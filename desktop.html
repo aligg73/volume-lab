@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Volume Lab AR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+/* VOICE: friendly classroom, hands-on, calm
+   IDEA: a Montessori work table you can touch
+   PICTURE: the live 3D table itself, full screen
+   COLOUR+TYPE: birch wood, water blue, sticker red; Nunito
+   LAYOUT: full-bleed scene, floating cards, control bar at the bottom */
+:root{color-scheme:light dark;--card:light-dark(rgba(255,255,255,.93),rgba(24,30,36,.92));--ink:light-dark(#1d2a33,#eef2f5);--mut:light-dark(#566874,#a3b3bd);--line:light-dark(#dde4e8,#36434c);--blue:#1688c9;--red:#e4002b;--gold:#c9962b;--btn:light-dark(#fff,#26313a)}
+:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;color:var(--ink);font:16px/1.5 Nunito,system-ui,sans-serif;overflow:hidden;-webkit-user-select:none;user-select:none}
+#stage{position:fixed;inset:0}
+#stage canvas{display:block;width:100%;height:100%;touch-action:none}
+.card{position:fixed;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 8px 28px rgba(20,40,60,.14);backdrop-filter:blur(8px)}
+.intro{left:16px;top:16px;width:min(360px,calc(100% - 32px));padding:4px 18px 14px}
+.intro summary{cursor:pointer;list-style:none;padding:10px 0 4px;display:flex;align-items:baseline;gap:10px}
+.intro summary::-webkit-details-marker{display:none}
+h1{font-size:24px;line-height:1.05;margin:0;font-weight:800}
+.intro summary span{font-size:13px;color:var(--mut)}
+ol{margin:8px 0 0;padding:0;list-style:none;counter-reset:s}
+ol li{counter-increment:s;position:relative;padding:6px 0 6px 38px;font-size:15px}
+ol li::before{content:counter(s);position:absolute;left:0;top:6px;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:14px;background:var(--line)}
+ol li.done::before{content:"✓";background:var(--blue);color:#fff}
+ol li b{color:var(--red)}
+.tip{font-size:13px;color:var(--mut);margin:8px 0 0}
+.read{right:16px;top:16px;width:236px;padding:12px 16px}
+.read h2{font-size:13px;margin:0 0 6px;color:var(--mut);font-weight:700}
+.read table{width:100%;border-collapse:collapse;font-size:14px}
+.read td{padding:3px 0}
+.read td:last-child{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:700}
+.read tr.tot td{border-top:1px solid var(--line);padding-top:7px;font-size:16px}
+.read tr.tot td:last-child{color:var(--blue)}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:1px}
+.read p{margin:6px 0 0;font-size:12.5px;color:var(--mut)}
+.bar{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);display:flex;flex-wrap:wrap;gap:8px;justify-content:center;align-items:center;width:max-content;max-width:calc(100% - 20px);padding:8px;border-radius:18px}
+button{font:inherit;font-size:15px;font-weight:700;min-height:44px;padding:0 16px;border-radius:12px;border:1px solid var(--line);background:var(--btn);color:var(--ink);cursor:pointer}
+button[aria-pressed=true]{background:var(--blue);border-color:var(--blue);color:#fff}
+button:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+#ar{background:var(--ink);color:var(--card);border-color:var(--ink)}
+.tilt{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;padding:0 6px}
+.tilt input{width:170px;accent-color:var(--blue);height:44px}
+.tilt output{width:44px;text-align:right;font-variant-numeric:tabular-nums}
+.jl{position:fixed;left:0;top:0;pointer-events:none;font-size:12.5px;font-weight:700;padding:3px 8px;border-radius:8px;background:rgba(255,255,255,.9);color:#1d2a33;border:1px solid #dde4e8;white-space:nowrap;transform:translate(10px,-50%)}
+#toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:#1d2a33;color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;max-width:min(520px,calc(100% - 32px));opacity:0;transition:opacity .25s;pointer-events:none;text-align:center}
+#toast.on{opacity:1}
+@media(max-width:700px){
+ .read{top:74px;right:10px;width:178px;padding:8px 12px}.read h2{display:none}
+ .read table{font-size:12.5px}.read td{padding:1px 0}.read tr.tot td{font-size:14px}.read p{display:none}
+ .intro{left:10px;top:10px;width:calc(100% - 20px)}
+ .tilt input{width:120px}
+ button{padding:0 12px;font-size:14px}
+}
+@media (prefers-reduced-motion:reduce){#toast{transition:none}}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+
+<details class="card intro" id="intro" open>
+ <summary><h1>Volume lab</h1><span>AR prototype · tap to fold</span></summary>
+ <ol>
+  <li id="s1">Tap the <b style="color:var(--gold)">golden thousand cube</b>. 1000 cm³ becomes exactly 1 litre of water.</li>
+  <li id="s2">Pick up the jug and tilt it to pour into the jar, bowl and flask. Watch the total: it never changes.</li>
+  <li id="s3">Peel a <b>red sticker</b> (press and drag it off). Water jets out, faster from the deeper holes.</li>
+ </ol>
+ <p class="tip">Drag the jug to carry it · mouse wheel, arrow keys or the slider to tilt · drag empty space to look around · double-click the jug to set it down.</p>
+</details>
+
+<aside class="card read" aria-live="polite">
+ <h2>Where the water is</h2>
+ <table id="rt"></table>
+ <p id="rnote">The cube is still solid: 1000 cm³ of beads.</p>
+</aside>
+
+<div class="card bar">
+ <label class="tilt">Tilt <input type="range" id="tilt" min="-120" max="120" step="1" value="0"><output id="tv">0°</output></label>
+ <button id="down">Set down</button>
+ <button id="restick">Re-stick</button>
+ <button id="slow" aria-pressed="false">Slow-mo</button>
+ <button id="moon" aria-pressed="false">Moon gravity</button>
+ <button id="reset">Reset</button>
+ <button id="ar" hidden>Enter AR</button>
+</div>
+<div id="labels"></div>
+<div id="toast" role="status"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+{
+const T=THREE,$=id=>document.getElementById(id),stage=$('stage');
+const R=0.055,H=0.17,AJ=Math.PI*R*R,HOLE_A=Math.PI*0.0025**2,CD=0.62,STK=0.018;
+let G=9.81,TS=1;
+
+/* ---------- renderer, scene, camera ---------- */
+const renderer=new T.WebGLRenderer({antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.localClippingEnabled=true;renderer.xr.enabled=true;
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;
+stage.appendChild(renderer.domElement);
+const el=renderer.domElement;
+const scene=new T.Scene(),BG=new T.Color('#eef1ee');scene.background=BG;
+const camera=new T.PerspectiveCamera(38,1,0.01,30);
+const lab=new T.Group(),room=new T.Group();scene.add(lab,room);
+
+const hemi=new T.HemisphereLight(0xffffff,0x9c8462,0.55);scene.add(hemi);
+const sun=new T.DirectionalLight(0xffffff,0.62);sun.position.set(0.6,1.5,0.9);sun.castShadow=true;
+sun.shadow.mapSize.set(1024,1024);Object.assign(sun.shadow.camera,{left:-0.8,right:0.8,top:0.8,bottom:-0.8,near:0.1,far:4});sun.shadow.bias=-0.0005;
+scene.add(sun);
+
+const std=(c,o={})=>new T.MeshStandardMaterial(Object.assign({color:c,roughness:0.6},o));
+const floorMat=std('#d6b88a',{roughness:0.8}),wallMat=std('#f1ede4',{roughness:1});
+const floor=new T.Mesh(new T.PlaneGeometry(6,6),floorMat);floor.rotation.x=-Math.PI/2;floor.position.y=-0.72;floor.receiveShadow=true;room.add(floor);
+const wall=new T.Mesh(new T.PlaneGeometry(6,3),wallMat);wall.position.set(0,0.6,-1.3);room.add(wall);
+// shelves on the wall, a nod to the classroom
+const birch=std('#e3c99c',{roughness:0.7});
+for(let i=0;i<4;i++){const s=new T.Mesh(new T.BoxGeometry(2.4,0.025,0.25),birch);s.position.set(0,-0.3+i*0.42,-1.18);room.add(s);
+ for(let j=0;j<7;j++){const b=new T.Mesh(new T.BoxGeometry(0.16+((i*7+j)%3)*0.04,0.1,0.16),birch);b.position.set(-1.05+j*0.34,-0.235+i*0.42,-1.15);room.add(b)}}
+// table: top + cloth + legs
+const table=new T.Group();lab.add(table);
+const cloth=new T.Mesh(new T.BoxGeometry(1.34,0.012,0.62),std('#a9c3d2',{roughness:0.9}));cloth.position.y=-0.006;cloth.receiveShadow=true;table.add(cloth);
+const legs=new T.Group();room.add(legs);
+for(const x of[-0.6,0.6])for(const z of[-0.25,0.25]){const l=new T.Mesh(new T.BoxGeometry(0.06,0.72,0.06),birch);l.position.set(x,-0.36-0.012,z);l.castShadow=true;legs.add(l)}
+
+/* ---------- materials ---------- */
+const water=new T.MeshStandardMaterial({color:'#2aa2d6',transparent:true,opacity:0.8,roughness:0.12,side:T.DoubleSide});
+const glass=new T.MeshStandardMaterial({color:'#e6f2f7',transparent:true,opacity:0.2,roughness:0.05,side:T.DoubleSide,depthWrite:false});
+const rimMat=new T.MeshStandardMaterial({color:'#ffffff',transparent:true,opacity:0.55,roughness:0.1,depthWrite:false});
+const red=std('#e8264a',{roughness:0.45,side:T.DoubleSide});
+
+/* ---------- vessels (lathe profiles: [radius, y] of the inner wall) ---------- */
+const vessels=[];
+function vessel(name,colour,x,z,prof,mat,rimR){
+ const g=new T.Group();g.position.set(x,0,z);lab.add(g);
+ const shell=new T.Mesh(new T.LatheGeometry([[0,prof[0][1]],...prof].map(p=>new T.Vector2(p[0],p[1])),48),mat);
+ shell.renderOrder=3;shell.castShadow=true;g.add(shell);
+ const top=prof[prof.length-1][1],y0=prof[0][1],N=300,cum=[0];
+ const rAt=y=>{for(let i=1;i<prof.length;i++)if(y<=prof[i][1]){const a=prof[i-1],b=prof[i],t=(y-a[1])/((b[1]-a[1])||1);return a[0]+(b[0]-a[0])*t}return prof[prof.length-1][0]};
+ for(let i=1;i<=N;i++){const r=rAt(y0+(top-y0)*(i-0.5)/N);cum.push(cum[i-1]+Math.PI*r*r*(top-y0)/N*1e6)}
+ const ring=new T.Mesh(new T.TorusGeometry(prof[prof.length-1][0],rimR||0.0025,8,48),mat===glass?rimMat:mat);ring.rotation.x=Math.PI/2;ring.position.y=top;g.add(ring);
+ const liq=new T.Mesh(new T.BufferGeometry(),water);liq.renderOrder=1;liq.visible=false;g.add(liq);
+ const v={name,colour,x,z,prof,rAt,top,y0,cum,N,vol:0,cap:cum[N],rimR:prof[prof.length-1][0],liq,lastH:-1};
+ v.hAt=vol=>{if(vol<=0)return y0;if(vol>=v.cap)return top;let lo=0,hi=N;while(hi-lo>1){const m=(lo+hi)>>1;if(cum[m]<vol)lo=m;else hi=m}return y0+(top-y0)*(lo+(vol-cum[lo])/(cum[hi]-cum[lo]))/N};
+ vessels.push(v);return v;
+}
+function updateLiquid(v){
+ const h=v.hAt(v.vol),show=v.vol>0.5;
+ if(show===v.liq.visible&&Math.abs(h-v.lastH)<0.0003)return;
+ v.lastH=h;v.liq.visible=show;if(!show)return;
+ const lo=v.y0+0.0015,pts=[new T.Vector2(0,lo)];
+ for(const p of v.prof)if(p[1]<h)pts.push(new T.Vector2(Math.max(p[0]-0.002,0.001),Math.max(p[1],lo)));
+ pts.push(new T.Vector2(Math.max(v.rAt(h)-0.002,0.001),h),new T.Vector2(0,h));
+ v.liq.geometry.dispose();v.liq.geometry=new T.LatheGeometry(pts,40);
+}
+const basin=vessel('Red basin','#e8264a',-0.40,0.02,[[0.15,0.012],[0.2,0.13]],red,0.008);
+const sphere=[];for(let i=0;i<=14;i++){const a=-1.35+2.5*i/14;sphere.push([0.075*Math.cos(a),0.08+0.075*Math.sin(a)])}
+const jar=vessel('Tall jar','#7fc6e8',0.08,0,[[0.038,0.006],[0.038,0.27]],glass);
+const bowl=vessel('Wide bowl','#3aa0d0',0.28,0,[[0.05,0.006],[0.09,0.04],[0.115,0.085]],glass);
+const flask=vessel('Round flask','#1f6f9e',0.49,0,[...sphere,[0.02,0.165],[0.02,0.25]],glass);
+const stand=new T.Mesh(new T.BoxGeometry(0.085,0.12-0.012,0.085),std('#22272b',{roughness:0.5}));
+stand.position.set(basin.x,0.012+(0.12-0.012)/2,basin.z);stand.castShadow=true;lab.add(stand);
+
+/* ---------- spilled water puddle ---------- */
+const spill={vol:0,x:0,z:0};
+const puddle=new T.Mesh(new T.CylinderGeometry(1,1,0.002,40),new T.MeshStandardMaterial({color:'#5fb9e0',transparent:true,opacity:0.55,roughness:0.05}));
+puddle.position.y=0.001;puddle.visible=false;lab.add(puddle);
+function addSpill(ml,x,z){const n=spill.vol+ml;spill.x=(spill.x*spill.vol+x*ml)/n;spill.z=(spill.z*spill.vol+z*ml)/n;spill.vol=n}
+function addTo(t,ml,at){if(ml<=0)return;if(t){t.vol+=ml;if(t.vol>t.cap){const ex=t.vol-t.cap;t.vol=t.cap;addSpill(ex,t.x+t.rimR+0.03,t.z)}}else addSpill(ml,at.x,at.z)}
+
+/* ---------- golden thousand cube ---------- */
+const cv=document.createElement('canvas');cv.width=cv.height=256;const cx=cv.getContext('2d');
+cx.fillStyle='#7a4f0e';cx.fillRect(0,0,256,256);
+for(let i=0;i<10;i++)for(let j=0;j<10;j++){const x=12.8+i*25.6,y=12.8+j*25.6,gr=cx.createRadialGradient(x-4,y-4,1,x,y,12.5);
+ gr.addColorStop(0,'#fff4c8');gr.addColorStop(0.35,'#e8b849');gr.addColorStop(1,'#73490c');cx.fillStyle=gr;cx.beginPath();cx.arc(x,y,12,0,7);cx.fill()}
+const tex=new T.CanvasTexture(cv);
+const cube=new T.Mesh(new T.BoxGeometry(0.1,0.1,0.1),new T.MeshStandardMaterial({map:tex,metalness:0.55,roughness:0.35}));
+const CUBE0=new T.Vector3(-0.12,0.05,0.16);cube.position.copy(CUBE0);cube.castShadow=true;lab.add(cube);
+let melting=null,melted=false;
+
+/* ---------- the jug (origin at the centre of its base) ---------- */
+const jug=new T.Group();lab.add(jug);
+const jugWall=new T.Mesh(new T.CylinderGeometry(R+0.002,R+0.0015,H,48,1,true),new T.MeshStandardMaterial({color:'#f6f8f9',transparent:true,opacity:0.3,roughness:0.35,side:T.DoubleSide,depthWrite:false}));
+jugWall.position.y=H/2;jugWall.renderOrder=3;jug.add(jugWall);
+const jugBase=new T.Mesh(new T.CircleGeometry(R+0.0015,48),jugWall.material);jugBase.rotation.x=-Math.PI/2;jugBase.position.y=0.001;jug.add(jugBase);
+const jugRim=new T.Mesh(new T.TorusGeometry(R+0.002,0.002,8,48),rimMat);jugRim.rotation.x=Math.PI/2;jugRim.position.y=H;jug.add(jugRim);
+const handle=new T.Mesh(new T.TorusGeometry(0.045,0.008,10,24,Math.PI),std('#f2f4f5',{transparent:true,opacity:0.75}));
+handle.rotation.z=Math.PI/2;handle.position.set(-R-0.002,H*0.55,0);handle.castShadow=true;jug.add(handle);
+const litre=new T.Mesh(new T.TorusGeometry(R+0.0025,0.0011,6,48,Math.PI*0.6),std('#1d2a33'));litre.rotation.set(Math.PI/2,0,Math.PI*0.2);litre.position.y=1e-3/AJ;jug.add(litre);
+const body=new T.Mesh(new T.CylinderGeometry(R-0.001,R-0.001,H-0.002,40),new T.MeshStandardMaterial({color:'#2aa2d6',transparent:true,opacity:0.8,roughness:0.12,side:T.DoubleSide}));
+body.position.y=H/2;body.renderOrder=1;jug.add(body);
+const levelPlane=new T.Plane(new T.Vector3(0,-1,0),0),bottomPlane=new T.Plane();
+body.material.clippingPlanes=[levelPlane];
+const capG=new T.Group(),capGeo=new T.CircleGeometry(R-0.001,40);capGeo.rotateX(-Math.PI/2);
+const cap=new T.Mesh(capGeo,new T.MeshStandardMaterial({color:'#4fb6e3',transparent:true,opacity:0.85,roughness:0.08,side:T.DoubleSide,clippingPlanes:[bottomPlane]}));
+cap.renderOrder=2;capG.add(cap);lab.add(capG);
+
+// stickers covering holes on the front of the jug
+const holes=[0.025,0.055,0.085].map((h,i)=>{
+ const hole=new T.Mesh(new T.CircleGeometry(0.0028,16),std('#0d1419'));hole.position.set(0,h,R+0.0026);jug.add(hole);
+ const pivot=new T.Group();pivot.position.set(0,h+STK/2,R+0.0034);jug.add(pivot);
+ const mesh=new T.Mesh(new T.PlaneGeometry(STK,STK),std('#e4002b',{roughness:0.5,side:T.DoubleSide,emissive:'#3a0008'}));
+ mesh.position.y=-STK/2;pivot.add(mesh);
+ const lbl=document.createElement('div');lbl.className='jl';lbl.hidden=true;$('labels').appendChild(lbl);
+ return{i,h,pos:new T.Vector3(0,h,R+0.003),pivot,mesh,open:false,peel:0,lbl};
+});
+const falling=[];
+function detach(h){h.open=true;h.peel=1;lab.attach(h.mesh);falling.push({m:h.mesh,v:new T.Vector3(0,0.3,0.25),spin:5});mark('s3')}
+function restick(){for(const h of holes){h.pivot.add(h.mesh);h.mesh.position.set(0,-STK/2,0);h.mesh.quaternion.identity();h.open=false;h.peel=0;h.pivot.rotation.x=0}falling.length=0}
+
+/* ---------- jug state ---------- */
+let V=0,lifted=false,jugY=0.12,tilt=0,xrHeld=null;
+function jugHome(){lab.attach(jug);jug.position.set(basin.x,0.12,basin.z);jug.rotation.set(0,0,0);jugY=0.12;lifted=false;setTilt(0)}
+function lift(){if(!lifted){lifted=true;jugY=0.3}}
+function setTilt(d){tilt=Math.max(-120,Math.min(120,d));$('tilt').value=tilt;$('tv').textContent=Math.round(tilt)+'°'}
+function setDown(quiet){
+ const p=jug.position,db=Math.hypot(p.x-basin.x,p.z-basin.z);
+ if(db<0.13){p.x=basin.x;p.z=basin.z;jugY=0.12}
+ else{
+  const hit=vessels.some(v=>v!==basin&&Math.hypot(p.x-v.x,p.z-v.z)<v.rimR+R+0.01)||(!melted&&!melting&&Math.hypot(p.x-cube.position.x,p.z-cube.position.z)<0.1)||db<0.2+R;
+  if(hit){if(!quiet)toast('Move the jug to a clear spot on the table first.');return}
+  jugY=0;
+ }
+ lifted=false;setTilt(0);
+}
+
+/* ---------- ballistic water path: returns where it lands ---------- */
+const vessIn=(v,p)=>{const dx=p.x-v.x,dz=p.z-v.z;return dx*dx+dz*dz<v.rimR*v.rimR*0.92};
+function land(p0,v0){
+ const p=p0.clone(),v=v0.clone(),prev=new T.Vector3(),pts=[p0.clone()];
+ let inV=vessels.find(ve=>p.y<ve.top&&p.y>ve.y0&&vessIn(ve,p))||null;
+ for(let i=0;i<500;i++){
+  prev.copy(p);v.y-=G*0.003;p.addScaledVector(v,0.003);
+  if(!inV)for(const ve of vessels)if(prev.y>=ve.top&&p.y<ve.top&&vessIn(ve,p)){inV=ve;break}
+  if(i%3===2)pts.push(p.clone());
+  if(inV&&(p.y<=inV.hAt(inV.vol)||Math.hypot(p.x-inV.x,p.z-inV.z)>inV.rAt(Math.max(p.y,inV.y0))-0.002)){pts.push(p.clone());return{t:inV,pts,at:p}}
+  if(!inV&&p.y<=0.002){p.y=0.002;pts.push(p.clone());return{t:null,pts,at:p}}
+ }
+ return{t:null,pts,at:p};
+}
+const streamMat=new T.MeshStandardMaterial({color:'#3fb0e0',transparent:true,opacity:0.85,roughness:0.1});
+const streams=[0,1,2,3].map(()=>{const m=new T.Mesh(new T.BufferGeometry(),streamMat);m.visible=false;m.renderOrder=1;lab.add(m);return m});
+function drawStream(i,pts,r){const m=streams[i];if(!pts||pts.length<2){if(m.visible){m.visible=false;m.geometry.dispose()}return}
+ m.geometry.dispose();m.geometry=new T.TubeGeometry(new T.CatmullRomCurve3(pts),Math.min(48,pts.length*2),r,6,false);m.visible=true}
+
+/* ---------- desktop / touch interaction ---------- */
+const ray=new T.Raycaster(),ndc=new T.Vector2();let drag=null;
+function aim(e){const r=el.getBoundingClientRect();ndc.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1);ray.setFromCamera(ndc,camera)}
+function planeHit(y){const o=ray.ray.origin,d=ray.ray.direction;if(Math.abs(d.y)<1e-4)return null;const t=(y-o.y)/d.y;return t>0?o.clone().addScaledVector(d,t):null}
+el.addEventListener('pointerdown',e=>{
+ aim(e);
+ const sh=ray.intersectObjects(holes.filter(h=>!h.open).map(h=>h.mesh));
+ if(sh.length){drag={type:'peel',h:holes.find(h=>h.mesh===sh[0].object),x0:e.clientX,y0:e.clientY}}
+ else if(!melted&&!melting&&ray.intersectObject(cube).length){melt();e.stopImmediatePropagation();return}
+ else if(ray.intersectObject(jug,true).length){lift();const gy=jugY+H/2,p=planeHit(gy);drag={type:'jug',gy,off:p?new T.Vector3(jug.position.x-p.x,0,jug.position.z-p.z):new T.Vector3()}}
+ if(drag){e.stopImmediatePropagation();el.setPointerCapture(e.pointerId)}
+});
+el.addEventListener('pointermove',e=>{
+ if(!drag)return;
+ if(drag.type==='peel'){const h=drag.h;h.peel=Math.min(1,Math.hypot(e.clientX-drag.x0,e.clientY-drag.y0)/70);if(h.peel>=1){detach(h);drag=null}}
+ else{aim(e);const p=planeHit(drag.gy);if(p){jug.position.x=Math.max(-0.62,Math.min(0.62,p.x+drag.off.x));jug.position.z=Math.max(-0.28,Math.min(0.3,p.z+drag.off.z))}}
+});
+const endDrag=()=>{if(drag&&drag.type==='peel'&&!drag.h.open)drag.h.peel=0;drag=null};
+el.addEventListener('pointerup',endDrag);el.addEventListener('pointercancel',endDrag);
+el.addEventListener('dblclick',e=>{aim(e);if(ray.intersectObject(jug,true).length)setDown()});
+el.addEventListener('wheel',e=>{if(lifted&&!xrHeld){e.preventDefault();e.stopImmediatePropagation();setTilt(tilt-e.deltaY*0.08)}},{passive:false});
+addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;if(e.key==='ArrowRight'){lift();setTilt(tilt+5)}if(e.key==='ArrowLeft'){lift();setTilt(tilt-5)}});
+const controls=new T.OrbitControls(camera,el);
+controls.target.set(0.04,0.1,0);controls.enablePan=false;controls.enableDamping=true;controls.minDistance=0.45;controls.maxDistance=2.4;controls.maxPolarAngle=1.48;
+
+$('tilt').addEventListener('input',e=>{lift();setTilt(+e.target.value)});
+$('down').onclick=()=>setDown();
+$('restick').onclick=restick;
+$('slow').onclick=e=>{TS=TS===1?0.25:1;e.target.setAttribute('aria-pressed',TS!==1)};
+$('moon').onclick=e=>{G=G>5?1.62:9.81;e.target.setAttribute('aria-pressed',G<5);toast(G<5?'Moon gravity: 1.62 m/s². Jets are slower and arc wider.':'Earth gravity: 9.81 m/s².')};
+$('reset').onclick=reset;
+function melt(){if(melted||melting)return;melting={t:0,from:cube.position.clone()};mark('s1');setTimeout(()=>{$('intro').open=false},1800)}
+function reset(){V=0;for(const v of vessels)v.vol=0;spill.vol=0;restick();jugHome();melted=false;melting=null;cube.visible=true;cube.scale.setScalar(1);cube.position.copy(CUBE0);for(const s of['s1','s2','s3'])$(s).classList.remove('done')}
+function mark(id){$(id).classList.add('done')}
+let tt;function toast(m){const t=$('toast');t.textContent=m;t.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('on'),3800)}
+
+/* ---------- WebXR: grab the jug with a controller or a pinch ---------- */
+const arBtn=$('ar');
+if(navigator.xr){arBtn.hidden=false;navigator.xr.isSessionSupported('immersive-ar').then(ok=>{if(!ok)arBtn.title='This browser or frame reports no AR support'}).catch(()=>{})}
+arBtn.onclick=async()=>{
+ const cur=renderer.xr.getSession();if(cur){cur.end();return}
+ try{
+  const s=await navigator.xr.requestSession('immersive-ar',{requiredFeatures:['local-floor'],optionalFeatures:['hand-tracking']});
+  renderer.xr.setReferenceSpaceType('local-floor');await renderer.xr.setSession(s);
+  scene.background=null;room.visible=false;lab.position.set(0,0.78,-0.55);arBtn.textContent='Exit AR';
+  s.addEventListener('end',()=>{if(xrHeld){lab.attach(jug);xrHeld=null}scene.background=BG;room.visible=true;lab.position.set(0,0,0);arBtn.textContent='Enter AR';setDown(true)});
+ }catch(err){toast('AR could not start here ('+(err.name||'blocked')+'). Open the standalone file in Meta Quest Browser.')}
+};
+const grips=[0,1].map(i=>{const g=renderer.xr.getControllerGrip(i);scene.add(g);
+ const tip=new T.Mesh(new T.SphereGeometry(0.008,12,8),std('#ffffff',{emissive:'#88ccee'}));g.add(tip);
+ g.addEventListener('selectstart',()=>xrStart(g));g.addEventListener('selectend',()=>xrEnd(g));return g});
+const wv=new T.Vector3(),wv2=new T.Vector3();
+function xrStart(g){
+ g.getWorldPosition(wv);
+ for(const h of holes){if(h.open)continue;h.mesh.getWorldPosition(wv2);if(wv2.distanceTo(wv)<0.04){g.userData.peel={h,p0:wv.clone()};return}}
+ if(!melted&&!melting&&cube.getWorldPosition(wv2).distanceTo(wv)<0.09){melt();return}
+ jug.localToWorld(wv2.set(0,H/2,0));if(wv2.distanceTo(wv)<0.14){g.attach(jug);lifted=true;xrHeld=g}
+}
+function xrEnd(g){
+ if(g.userData.peel){const h=g.userData.peel.h;if(!h.open)h.peel=0;g.userData.peel=null}
+ if(xrHeld===g){lab.attach(jug);xrHeld=null;if(jug.position.y<0.22){jug.rotation.set(0,0,0);setDown(true);if(lifted)jugY=jug.position.y}else jugY=jug.position.y}
+}
+
+/* ---------- readout ---------- */
+const rows=[['Jug','#2aa2d6',()=>V],...vessels.slice(1).map(v=>[v.name,v.colour,()=>v.vol]),['Red basin','#e8264a',()=>basin.vol],['Spilled on table','#9fb3bf',()=>spill.vol]];
+function readout(){
+ const tot=V+vessels.reduce((a,v)=>a+v.vol,0)+spill.vol;
+ $('rt').innerHTML=rows.map(r=>`<tr><td><span class="dot" style="background:${r[1]}"></span>${r[0]}</td><td>${Math.round(r[2]())} ml</td></tr>`).join('')+`<tr class="tot"><td>Total water</td><td>${Math.round(tot)} ml</td></tr>`;
+ $('rnote').textContent=melted?'Same litre, different shapes: the total stays at 1000 ml.':melting?'Melting…':'The cube is still solid: 1000 cm³ of beads.';
+ if(jar.vol+bowl.vol+flask.vol>40)mark('s2');
+}
+
+/* ---------- frame loop ---------- */
+const U=new T.Vector3(),B=new T.Vector3(),q=new T.Quaternion(),tmp=new T.Vector3(),Y=new T.Vector3(0,1,0);
+let last=performance.now(),rt=0;
+function tick(now){
+ const raw=Math.min((now-last)/1000,0.05),dt=raw*TS;last=now;
+ if(!xrHeld){jug.position.y+=(jugY-jug.position.y)*Math.min(1,raw*10);jug.rotation.z+=(-tilt*Math.PI/180-jug.rotation.z)*Math.min(1,raw*8)}
+ if(melting){
+  melting.t=Math.min(1,melting.t+raw/1.6);const k=melting.t;
+  jug.getWorldPosition(tmp);lab.worldToLocal(tmp);tmp.y+=H+0.08;
+  cube.position.lerpVectors(melting.from,tmp,Math.min(1,k*1.6));cube.scale.setScalar(Math.max(0.02,1-k));
+  const target=1000*k;V+=target-(melting.done||0);melting.done=target;
+  if(k>=1){melting=null;melted=true;cube.visible=false}
+ }
+ for(const h of holes)if(!h.open)h.pivot.rotation.x+=(-h.peel*1.9-h.pivot.rotation.x)*Math.min(1,raw*14);
+ for(const f of falling){if(f.v.lengthSq()===0)continue;f.v.y-=9.81*raw;f.m.position.addScaledVector(f.v,raw);f.m.rotation.x+=f.spin*raw;if(f.m.position.y<0.003){f.m.position.y=0.003;f.m.rotation.set(-Math.PI/2,0,0);f.v.set(0,0,0)}}
+ for(const g of grips){const pe=g.userData.peel;if(pe&&!pe.h.open){g.getWorldPosition(wv);pe.h.peel=Math.min(1,wv.distanceTo(pe.p0)/0.05);if(pe.h.peel>=1){detach(pe.h);g.userData.peel=null}}}
+
+ scene.updateMatrixWorld();
+ jug.getWorldPosition(B);lab.worldToLocal(B);jug.getWorldQuaternion(q);U.copy(Y).applyQuaternion(q);
+ const cosT=U.y,sinT=Math.sqrt(Math.max(0,1-cosT*cosT));
+ let vmax=0;if(cosT>0.02){const tn=sinT/cosT;vmax=(2*R*tn<=H?AJ*(H-R*tn):AJ*H*H/(4*R*tn))*1e6}
+ const lipY=B.y+H*cosT-R*sinT,yL=Math.min(B.y+(V*1e-6/AJ)*cosT,lipY);
+
+ // pouring over the lowest point of the rim
+ let poured=false;
+ if(V>vmax+0.01&&dt>0){
+  const out=Math.min(V-vmax,(90+5*(V-vmax))*dt);
+  const d=new T.Vector3(0,-1,0).addScaledVector(U,cosT);
+  if(d.length()<0.05)d.set(1,0,0).applyQuaternion(q);d.normalize();
+  const sp=B.clone().addScaledVector(U,H).addScaledVector(d,R+0.004);
+  const hz=new T.Vector3(d.x,0,d.z);if(hz.lengthSq()<1e-6)hz.set(1,0,0);hz.normalize();
+  const L=land(sp,hz.multiplyScalar(0.35));addTo(L.t,out,L.at);V-=out;poured=true;
+  drawStream(0,L.pts,0.0022+0.006*Math.min(1,Math.sqrt(out/dt/220)));
+ }
+ if(!poured)drawStream(0,null);
+
+ // jets through open holes: v = sqrt(2 g h)
+ for(const h of holes){
+  let shown=false;
+  if(h.open&&V>0.5&&dt>0){
+   const hp=jug.localToWorld(h.pos.clone());lab.worldToLocal(hp);const dep=yL-hp.y;
+   if(dep>0.0005){
+    const vel=Math.sqrt(2*G*dep),out=Math.min(V,CD*HOLE_A*vel*1e6*dt);
+    const n=new T.Vector3(0,0,1).applyQuaternion(q).multiplyScalar(vel);
+    const L=land(hp,n);addTo(L.t,out,L.at);V-=out;drawStream(h.i+1,L.pts,0.0019);shown=true;
+    if(!renderer.xr.isPresenting){
+     const sp=hp.clone();lab.localToWorld(sp);sp.project(camera);
+     h.lbl.style.left=((sp.x+1)/2*innerWidth)+'px';h.lbl.style.top=((1-sp.y)/2*innerHeight)+'px';
+     h.lbl.textContent=`${(dep*100).toFixed(1)} cm deep · ${vel.toFixed(2)} m/s`;
+    }
+   }
+  }
+  if(!shown)drawStream(h.i+1,null);
+  h.lbl.hidden=!shown||renderer.xr.isPresenting;
+ }
+ V=Math.max(0,V);
+
+ // jug liquid: clip a cylinder at the level plane, add an elliptical surface cap
+ const ly=lab.position.y;
+ body.visible=V>0.5;levelPlane.constant=yL+ly;
+ bottomPlane.setFromNormalAndCoplanarPoint(U,B.clone().add(lab.position));
+ cap.visible=V>0.5&&cosT>0.1;
+ if(cap.visible){
+  const s=(yL-B.y)/cosT;capG.position.copy(B).addScaledVector(U,s);
+  const hx=U.x,hz=U.z,hl=Math.hypot(hx,hz);capG.rotation.set(0,hl>1e-4?Math.atan2(-hz/hl,hx/hl):0,0);cap.scale.set(1/Math.max(cosT,0.15),1,1);
+ }
+ for(const v of vessels)updateLiquid(v);
+ puddle.visible=spill.vol>0.5;if(puddle.visible){const r=Math.min(0.2,0.0055*Math.sqrt(spill.vol));puddle.scale.set(r,1,r);puddle.position.x=spill.x;puddle.position.z=spill.z}
+
+ if(!renderer.xr.isPresenting)controls.update();
+ if((rt+=raw)>0.12){rt=0;readout()}
+ renderer.render(scene,camera);
+}
+
+/* ---------- sizing & theme ---------- */
+function size(){const w=stage.clientWidth,h=stage.clientHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix()}
+const ro=new ResizeObserver(size);ro.observe(stage);size();
+function frame(){const a=Math.max(0.45,stage.clientWidth/stage.clientHeight),th=Math.tan(19*Math.PI/180),d=Math.max(1.1,0.82/(th*a));
+ const dir=new T.Vector3(0,a<0.8?1.25:0.85,1).normalize();controls.target.set(0.02,-0.02,0);controls.maxDistance=Math.max(2.4,d*1.3);camera.position.copy(controls.target).addScaledVector(dir,d)}
+frame();
+if(innerWidth<700)$('intro').open=false;
+function theme(){const a=document.documentElement.dataset.theme,dk=a==='dark'||(!a&&matchMedia('(prefers-color-scheme: dark)').matches);
+ BG.set(dk?'#1b2228':'#eef1ee');wallMat.color.set(dk?'#2b333a':'#f1ede4');floorMat.color.set(dk?'#6b5739':'#d6b88a');hemi.intensity=dk?0.42:0.55}
+const mo=new MutationObserver(theme);mo.observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',theme);theme();
+reset();readout();
+renderer.setAnimationLoop(tick);
+}
+</script>
+</body>
+</html>

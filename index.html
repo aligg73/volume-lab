@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Volume Lab MR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+/* Volume Lab, mixed reality with hand tracking.
+   Layers: camera video < 3D scene < real-hand cutout + hand markers < UI */
+:root{--card:rgba(255,255,255,.92);--ink:#1d2a33;--mut:#566874;--line:#dde4e8;--blue:#1688c9;--red:#e4002b;--gold:#c9962b}
+*{box-sizing:border-box;min-width:0}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0;background:#111;overflow:hidden}
+body{color:var(--ink);font:16px/1.5 Nunito,system-ui,sans-serif;-webkit-user-select:none;user-select:none;touch-action:none}
+#cam,#stage,#fx{position:fixed;inset:0;width:100%;height:100%}
+#cam{object-fit:cover;z-index:0}
+#stage{z-index:1}#stage canvas{display:block;width:100%;height:100%}
+#fx{z-index:2;pointer-events:none}
+.card{position:fixed;z-index:3;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 8px 28px rgba(0,0,0,.18)}
+.help{left:14px;top:14px;width:min(330px,calc(100% - 28px));padding:4px 16px 12px}
+.help summary{cursor:pointer;list-style:none;display:flex;align-items:baseline;gap:10px;padding:10px 0 2px}
+.help summary::-webkit-details-marker{display:none}
+h1{font-size:22px;line-height:1.05;margin:0;font-weight:800}
+.help summary span{font-size:13px;color:var(--mut)}
+ol{margin:6px 0 0;padding:0;list-style:none;counter-reset:s}
+ol li{counter-increment:s;position:relative;padding:5px 0 5px 34px;font-size:14.5px}
+ol li::before{content:counter(s);position:absolute;left:0;top:5px;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:13px;background:var(--line)}
+ol li.done::before{content:"✓";background:var(--blue);color:#fff}
+#status{margin:8px 0 0;font-size:13px;color:var(--mut)}
+.read{right:14px;top:14px;width:212px;padding:10px 14px}
+.read table{width:100%;border-collapse:collapse;font-size:13.5px}
+.read td{padding:2px 0}
+.read td:last-child{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:700}
+.read tr.tot td{border-top:1px solid var(--line);padding-top:6px;font-size:15px}
+.read tr.tot td:last-child{color:var(--blue)}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:1px}
+.bar{left:50%;bottom:12px;transform:translateX(-50%);display:flex;flex-wrap:wrap;gap:8px;justify-content:center;width:max-content;max-width:calc(100% - 20px);padding:8px;border-radius:18px}
+button{font:inherit;font-size:15px;font-weight:700;min-height:46px;padding:0 16px;border-radius:12px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer}
+button[aria-pressed=true]{background:var(--blue);border-color:var(--blue);color:#fff}
+button.go{background:var(--ink);color:#fff;border-color:var(--ink);font-size:18px;min-height:56px;padding:0 28px}
+button:focus-visible,summary:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+.jl{position:fixed;z-index:3;left:0;top:0;pointer-events:none;font-size:12.5px;font-weight:700;padding:3px 8px;border-radius:8px;background:rgba(255,255,255,.92);border:1px solid var(--line);white-space:nowrap;transform:translate(10px,-50%)}
+#start{position:fixed;inset:0;z-index:5;display:grid;place-items:center;padding:20px;background:radial-gradient(circle at 50% 40%,#2a3a46,#0f161b)}
+#start .card{position:static;max-width:520px;padding:26px 28px;text-align:left}
+#start h2{font-size:30px;line-height:1.05;margin:0 0 10px;font-weight:800}
+#start ul{margin:0 0 18px;padding-left:20px}#start li{margin:4px 0}
+#start .err{color:var(--red);font-weight:700;margin:12px 0 0}
+#toast{position:fixed;z-index:6;left:50%;bottom:92px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;max-width:min(520px,calc(100% - 32px));opacity:0;transition:opacity .25s;pointer-events:none;text-align:center}
+#toast.on{opacity:1}
+@media(max-width:700px){.read{top:auto;bottom:150px;right:10px;width:180px}.read table{font-size:12.5px}button{padding:0 12px;font-size:14px}}
+</style>
+</head>
+<body>
+<video id="cam" playsinline muted autoplay></video>
+<div id="stage"></div>
+<canvas id="fx"></canvas>
+
+<details class="card help" id="help" open>
+ <summary><h1>Volume lab</h1><span>hands only · tap to fold</span></summary>
+ <ol>
+  <li id="s1"><b>Pinch</b> or touch the golden cube with a fingertip: 1000 cm³ becomes 1 litre.</li>
+  <li id="s2">Make a <b>fist</b> on the jug to grab it. <b>Turn your fist</b> like pouring. Open your hand to let go.</li>
+  <li id="s3"><b>Pinch</b> a red sticker and pull it away. Water jets out.</li>
+ </ol>
+ <p id="status">Camera off</p>
+</details>
+
+<aside class="card read" aria-live="polite"><table id="rt"></table></aside>
+
+<div class="card bar">
+ <button id="flip">Use back camera</button>
+ <button id="front" aria-pressed="true">Hand in front</button>
+ <button id="restick">Re-stick</button>
+ <button id="slow" aria-pressed="false">Slow-mo</button>
+ <button id="reset">Reset</button>
+</div>
+<div id="labels"></div>
+<div id="toast" role="status"></div>
+
+<div id="start">
+ <div class="card">
+  <h2>Volume lab with your hands</h2>
+  <ul>
+   <li>Stand the tablet up (a case or stand) so both hands are free.</li>
+   <li>Sit about an arm's length away, in good light, facing the screen.</li>
+   <li>Reach toward the screen: your hand appears on the virtual table.</li>
+  </ul>
+  <button class="go" id="go">Start camera</button>
+  <p class="err" id="err" hidden></p>
+ </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script type="module">
+const T=THREE,$=id=>document.getElementById(id),stage=$('stage'),video=$('cam'),fx=$('fx'),fctx=fx.getContext('2d');
+const R=0.055,H=0.17,AJ=Math.PI*R*R,HOLE_A=Math.PI*0.0025**2,CD=0.62,STK=0.018,JZ=0.02;
+const MP='https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const MODEL='https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+let G=9.81,TS=1;
+
+/* ---------- renderer & scene (transparent over the camera image) ---------- */
+const renderer=new T.WebGLRenderer({antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.localClippingEnabled=true;
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;renderer.setClearColor(0x000000,0);
+stage.appendChild(renderer.domElement);
+const scene=new T.Scene(),camera=new T.PerspectiveCamera(40,1,0.01,20),lab=new T.Group();scene.add(lab);
+scene.add(new T.HemisphereLight(0xffffff,0x9c8462,0.6));
+const sun=new T.DirectionalLight(0xffffff,0.6);sun.position.set(0.5,1.4,0.9);sun.castShadow=true;sun.shadow.mapSize.set(1024,1024);
+Object.assign(sun.shadow.camera,{left:-0.8,right:0.8,top:0.8,bottom:-0.8,near:0.1,far:4});sun.shadow.bias=-0.0005;scene.add(sun);
+const std=(c,o={})=>new T.MeshStandardMaterial(Object.assign({color:c,roughness:0.6},o));
+const shelf=new T.Mesh(new T.BoxGeometry(1.34,0.02,0.4),std('#e3c99c',{roughness:0.7}));shelf.position.set(0,-0.01,0.03);shelf.receiveShadow=true;lab.add(shelf);
+
+const water=new T.MeshStandardMaterial({color:'#2aa2d6',transparent:true,opacity:0.82,roughness:0.12,side:T.DoubleSide});
+const glass=new T.MeshStandardMaterial({color:'#e6f2f7',transparent:true,opacity:0.3,roughness:0.05,side:T.DoubleSide,depthWrite:false});
+const rimMat=new T.MeshStandardMaterial({color:'#ffffff',transparent:true,opacity:0.7,roughness:0.1,depthWrite:false});
+const red=std('#e8264a',{roughness:0.45,side:T.DoubleSide});
+
+/* ---------- vessels ---------- */
+const vessels=[];
+function vessel(name,colour,x,z,prof,mat,rimR){
+ const g=new T.Group();g.position.set(x,0,z);lab.add(g);
+ const shell=new T.Mesh(new T.LatheGeometry([[0,prof[0][1]],...prof].map(p=>new T.Vector2(p[0],p[1])),48),mat);shell.renderOrder=3;shell.castShadow=true;g.add(shell);
+ const top=prof[prof.length-1][1],y0=prof[0][1],N=300,cum=[0];
+ const rAt=y=>{for(let i=1;i<prof.length;i++)if(y<=prof[i][1]){const a=prof[i-1],b=prof[i],t=(y-a[1])/((b[1]-a[1])||1);return a[0]+(b[0]-a[0])*t}return prof[prof.length-1][0]};
+ for(let i=1;i<=N;i++){const r=rAt(y0+(top-y0)*(i-0.5)/N);cum.push(cum[i-1]+Math.PI*r*r*(top-y0)/N*1e6)}
+ const ring=new T.Mesh(new T.TorusGeometry(prof[prof.length-1][0],rimR||0.0025,8,48),mat===glass?rimMat:mat);ring.rotation.x=Math.PI/2;ring.position.y=top;g.add(ring);
+ const liq=new T.Mesh(new T.BufferGeometry(),water);liq.renderOrder=1;liq.visible=false;g.add(liq);
+ const v={name,colour,x,z,prof,rAt,top,y0,cum,N,vol:0,cap:cum[N],rimR:prof[prof.length-1][0],liq,lastH:-1};
+ v.hAt=vol=>{if(vol<=0)return y0;if(vol>=v.cap)return top;let lo=0,hi=N;while(hi-lo>1){const m=(lo+hi)>>1;if(cum[m]<vol)lo=m;else hi=m}return y0+(top-y0)*(lo+(vol-cum[lo])/(cum[hi]-cum[lo]))/N};
+ vessels.push(v);return v;
+}
+function updateLiquid(v){
+ const h=v.hAt(v.vol),show=v.vol>0.5;
+ if(show===v.liq.visible&&Math.abs(h-v.lastH)<0.0003)return;
+ v.lastH=h;v.liq.visible=show;if(!show)return;
+ const lo=v.y0+0.0015,pts=[new T.Vector2(0,lo)];
+ for(const p of v.prof)if(p[1]<h)pts.push(new T.Vector2(Math.max(p[0]-0.002,0.001),Math.max(p[1],lo)));
+ pts.push(new T.Vector2(Math.max(v.rAt(h)-0.002,0.001),h),new T.Vector2(0,h));
+ v.liq.geometry.dispose();v.liq.geometry=new T.LatheGeometry(pts,40);
+}
+const basin=vessel('Red basin','#e8264a',-0.40,JZ,[[0.15,0.012],[0.2,0.13]],red,0.008);
+const sphere=[];for(let i=0;i<=14;i++){const a=-1.35+2.5*i/14;sphere.push([0.075*Math.cos(a),0.08+0.075*Math.sin(a)])}
+const jar=vessel('Tall jar','#7fc6e8',0.08,0,[[0.038,0.006],[0.038,0.27]],glass);
+const bowl=vessel('Wide bowl','#3aa0d0',0.28,0,[[0.05,0.006],[0.09,0.04],[0.115,0.085]],glass);
+const flask=vessel('Round flask','#1f6f9e',0.49,0,[...sphere,[0.02,0.165],[0.02,0.25]],glass);
+const stand=new T.Mesh(new T.BoxGeometry(0.085,0.108,0.085),std('#22272b',{roughness:0.5}));stand.position.set(basin.x,0.066,JZ);stand.castShadow=true;lab.add(stand);
+
+const spill={vol:0,x:0,z:0};
+const puddle=new T.Mesh(new T.CylinderGeometry(1,1,0.002,40),new T.MeshStandardMaterial({color:'#5fb9e0',transparent:true,opacity:0.6,roughness:0.05}));puddle.position.y=0.001;puddle.visible=false;lab.add(puddle);
+function addSpill(ml,x,z){const n=spill.vol+ml;spill.x=(spill.x*spill.vol+x*ml)/n;spill.z=(spill.z*spill.vol+z*ml)/n;spill.vol=n}
+function addTo(t,ml,at){if(ml<=0)return;if(t){t.vol+=ml;if(t.vol>t.cap){const ex=t.vol-t.cap;t.vol=t.cap;addSpill(ex,t.x+t.rimR+0.03,t.z)}}else addSpill(ml,at.x,at.z)}
+
+/* ---------- golden thousand cube ---------- */
+const cv=document.createElement('canvas');cv.width=cv.height=256;const cx=cv.getContext('2d');cx.fillStyle='#7a4f0e';cx.fillRect(0,0,256,256);
+for(let i=0;i<10;i++)for(let j=0;j<10;j++){const x=12.8+i*25.6,y=12.8+j*25.6,gr=cx.createRadialGradient(x-4,y-4,1,x,y,12.5);gr.addColorStop(0,'#fff4c8');gr.addColorStop(0.35,'#e8b849');gr.addColorStop(1,'#73490c');cx.fillStyle=gr;cx.beginPath();cx.arc(x,y,12,0,7);cx.fill()}
+const cube=new T.Mesh(new T.BoxGeometry(0.1,0.1,0.1),new T.MeshStandardMaterial({map:new T.CanvasTexture(cv),metalness:0.55,roughness:0.35}));
+const CUBE0=new T.Vector3(-0.12,0.05,0.1);cube.position.copy(CUBE0);cube.castShadow=true;lab.add(cube);
+let melting=null,melted=false;
+
+/* ---------- jug ---------- */
+const jug=new T.Group();lab.add(jug);
+const jugMat=new T.MeshStandardMaterial({color:'#f6f8f9',transparent:true,opacity:0.38,roughness:0.35,side:T.DoubleSide,depthWrite:false});
+const jugWall=new T.Mesh(new T.CylinderGeometry(R+0.002,R+0.0015,H,48,1,true),jugMat);jugWall.position.y=H/2;jugWall.renderOrder=3;jug.add(jugWall);
+const jugBase=new T.Mesh(new T.CircleGeometry(R+0.0015,48),jugMat);jugBase.rotation.x=-Math.PI/2;jugBase.position.y=0.001;jug.add(jugBase);
+const jugRim=new T.Mesh(new T.TorusGeometry(R+0.002,0.002,8,48),rimMat);jugRim.rotation.x=Math.PI/2;jugRim.position.y=H;jug.add(jugRim);
+const handle=new T.Mesh(new T.TorusGeometry(0.045,0.008,10,24,Math.PI),std('#f2f4f5',{transparent:true,opacity:0.8}));handle.rotation.z=Math.PI/2;handle.position.set(-R-0.002,H*0.55,0);jug.add(handle);
+const litre=new T.Mesh(new T.TorusGeometry(R+0.0025,0.0011,6,48,Math.PI*0.6),std('#1d2a33'));litre.rotation.set(Math.PI/2,0,Math.PI*0.2);litre.position.y=1e-3/AJ;jug.add(litre);
+const body=new T.Mesh(new T.CylinderGeometry(R-0.001,R-0.001,H-0.002,40),water.clone());body.position.y=H/2;body.renderOrder=1;jug.add(body);
+const levelPlane=new T.Plane(new T.Vector3(0,-1,0),0),bottomPlane=new T.Plane();body.material.clippingPlanes=[levelPlane];
+const capG=new T.Group(),capGeo=new T.CircleGeometry(R-0.001,40);capGeo.rotateX(-Math.PI/2);
+const cap=new T.Mesh(capGeo,new T.MeshStandardMaterial({color:'#4fb6e3',transparent:true,opacity:0.88,roughness:0.08,side:T.DoubleSide,clippingPlanes:[bottomPlane]}));cap.renderOrder=2;capG.add(cap);lab.add(capG);
+
+const holes=[0.025,0.055,0.085].map((h,i)=>{
+ const hole=new T.Mesh(new T.CircleGeometry(0.0028,16),std('#0d1419'));hole.position.set(0,h,R+0.0026);jug.add(hole);
+ const pivot=new T.Group();pivot.position.set(0,h+STK/2,R+0.0034);jug.add(pivot);
+ const mesh=new T.Mesh(new T.PlaneGeometry(STK,STK),std('#e4002b',{roughness:0.5,side:T.DoubleSide,emissive:'#3a0008'}));mesh.position.y=-STK/2;pivot.add(mesh);
+ const lbl=document.createElement('div');lbl.className='jl';lbl.hidden=true;$('labels').appendChild(lbl);
+ return{i,h,pos:new T.Vector3(0,h,R+0.003),pivot,mesh,open:false,peel:0,lbl};
+});
+const falling=[];
+function detach(h){h.open=true;h.peel=1;lab.attach(h.mesh);falling.push({m:h.mesh,v:new T.Vector3(0,0.3,0.25),spin:5});mark('s3')}
+function restick(){for(const h of holes){h.pivot.add(h.mesh);h.mesh.position.set(0,-STK/2,0);h.mesh.quaternion.identity();h.open=false;h.peel=0;h.pivot.rotation.x=0}falling.length=0}
+
+/* jug state: the hand sets a target position and tilt; the jug eases toward them */
+let V=0,tilt=0,heldBy=null;const jugT=new T.Vector3(basin.x,0.12,JZ);
+function placeJug(){
+ const x=jug.position.x;tilt=0;
+ if(Math.abs(x-basin.x)<0.16){jugT.set(basin.x,0.12,JZ);return}
+ const clear=!vessels.some(v=>v!==basin&&Math.abs(x-v.x)<v.rimR+R+0.01)&&!(cube.visible&&Math.abs(x-cube.position.x)<0.1)&&Math.abs(x-basin.x)>0.2+R;
+ if(clear&&jug.position.y<0.25){jugT.set(x,0,JZ)}else{jugT.set(basin.x,0.12,JZ);toast('No room there, so the jug went back on its stand.')}
+}
+
+/* ---------- ballistic water ---------- */
+const vessIn=(v,p)=>{const dx=p.x-v.x,dz=p.z-v.z;return dx*dx+dz*dz<v.rimR*v.rimR*0.92};
+function land(p0,v0){
+ const p=p0.clone(),v=v0.clone(),prev=new T.Vector3(),pts=[p0.clone()];
+ let inV=vessels.find(ve=>p.y<ve.top&&p.y>ve.y0&&vessIn(ve,p))||null;
+ for(let i=0;i<500;i++){
+  prev.copy(p);v.y-=G*0.003;p.addScaledVector(v,0.003);
+  if(!inV)for(const ve of vessels)if(prev.y>=ve.top&&p.y<ve.top&&vessIn(ve,p)){inV=ve;break}
+  if(i%3===2)pts.push(p.clone());
+  if(inV&&(p.y<=inV.hAt(inV.vol)||Math.hypot(p.x-inV.x,p.z-inV.z)>inV.rAt(Math.max(p.y,inV.y0))-0.002)){pts.push(p.clone());return{t:inV,pts,at:p}}
+  if(!inV&&p.y<=0.002){p.y=0.002;pts.push(p.clone());return{t:null,pts,at:p}}
+ }
+ return{t:null,pts,at:p};
+}
+const streamMat=new T.MeshStandardMaterial({color:'#3fb0e0',transparent:true,opacity:0.88,roughness:0.1});
+const streams=[0,1,2,3].map(()=>{const m=new T.Mesh(new T.BufferGeometry(),streamMat);m.visible=false;m.renderOrder=1;lab.add(m);return m});
+function drawStream(i,pts,r){const m=streams[i];if(!pts||pts.length<2){if(m.visible){m.visible=false;m.geometry.dispose()}return}
+ m.geometry.dispose();m.geometry=new T.TubeGeometry(new T.CatmullRomCurve3(pts),Math.min(48,pts.length*2),r,6,false);m.visible=true}
+
+/* ---------- screen helpers ---------- */
+let W=1,Hh=1,mirror=true;
+const sv=new T.Vector3();
+function toScreen(obj,dy=0){obj.getWorldPosition(sv);sv.y+=dy;sv.project(camera);return{x:(sv.x+1)/2*W,y:(1-sv.y)/2*Hh}}
+function planePoint(px,py,z){const n=new T.Vector2(px/W*2-1,-(py/Hh)*2+1),rc=new T.Raycaster();rc.setFromCamera(n,camera);const o=rc.ray.origin,d=rc.ray.direction,t=(z-o.z)/d.z;return o.clone().addScaledVector(d,t)}
+// camera image coordinates (0..1) to screen pixels, matching object-fit:cover and the mirror
+function lmToScreen(l){const vw=video.videoWidth||1280,vh=video.videoHeight||720,s=Math.max(W/vw,Hh/vh),ox=(W-vw*s)/2,oy=(Hh-vh*s)/2;return{x:ox+(mirror?1-l.x:l.x)*vw*s,y:oy+l.y*vh*s}}
+
+/* ---------- hand tracking ---------- */
+let landmarker=null,stream=null,facing='user',lastVT=-1,fps=0,fpsN=0,fpsT=performance.now();
+const hands=new Map();
+const D=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+async function startCamera(){
+ if(stream)stream.getTracks().forEach(t=>t.stop());
+ stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:1280},height:{ideal:720}},audio:false});
+ video.srcObject=stream;await video.play();
+ mirror=facing==='user';video.style.transform=mirror?'scaleX(-1)':'none';
+ $('flip').textContent=mirror?'Use back camera':'Use front camera';
+}
+async function startTracking(){
+ const {FilesetResolver,HandLandmarker}=await import(MP+'/vision_bundle.mjs');
+ const fs=await FilesetResolver.forVisionTasks(MP+'/wasm');
+ const opts=d=>({baseOptions:{modelAssetPath:MODEL,delegate:d},runningMode:'VIDEO',numHands:2,minHandDetectionConfidence:0.5,minHandPresenceConfidence:0.5,minTrackingConfidence:0.5});
+ try{landmarker=await HandLandmarker.createFromOptions(fs,opts('GPU'))}catch(e){landmarker=await HandLandmarker.createFromOptions(fs,opts('CPU'))}
+}
+$('go').onclick=async()=>{
+ const err=$('err');err.hidden=true;$('go').disabled=true;$('go').textContent='Starting…';
+ try{
+  if(!window.isSecureContext)throw new Error('The camera only works over https:// (or localhost). Host this file on an https site.');
+  await startCamera();$('go').textContent='Loading hand tracking…';
+  await startTracking();$('start').hidden=true;
+  try{await document.documentElement.requestFullscreen()}catch(e){}
+ }catch(e){const framed=window.self!==window.top;err.textContent=(framed&&(e.name==='NotAllowedError'||e.name==='SecurityError'||e.name==='TypeError')?'This viewer does not allow camera access. Download the page and open it from an https:// address in Chrome instead.':e.name==='NotAllowedError'?'Camera permission was refused. Allow it in the browser settings and try again.':e.message||String(e));err.hidden=false;$('go').disabled=false;$('go').textContent='Try again'}
+};
+$('flip').onclick=async()=>{facing=facing==='user'?'environment':'user';try{await startCamera()}catch(e){toast('Could not switch camera: '+e.message)}};
+
+function processHands(res,now){
+ const seen=new Set();
+ (res.landmarks||[]).forEach((lms,i)=>{
+  const key=(res.handednesses?.[i]?.[0]?.categoryName)||('h'+i);seen.add(key);
+  let h=hands.get(key);
+  const raw=lms.map(lmToScreen);if(!raw.every(p=>isFinite(p.x)&&isFinite(p.y)))return;
+  if(!h||!isFinite(h.P[0].x)){h={P:raw,grip:false,pinch:false,mode:null,seen:now};hands.set(key,h)}
+  else h.P=h.P.map((p,j)=>({x:p.x+(raw[j].x-p.x)*0.55,y:p.y+(raw[j].y-p.y)*0.55}));
+  h.seen=now;
+  const P=h.P,palm=Math.max(20,D(P[0],P[9]));
+  const curl=(D(P[12],P[0])+D(P[16],P[0])+D(P[20],P[0]))/3/palm,idx=D(P[8],P[0])/palm,pin=D(P[4],P[8])/palm;
+  const wasGrip=h.grip,wasPinch=h.pinch;
+  h.grip=wasGrip?(curl<1.55):(curl<1.25&&idx<1.45);
+  h.pinch=!h.grip&&(wasPinch?pin<0.5:pin<0.3);
+  h.palm=palm;h.c={x:(P[0].x+P[5].x+P[9].x+P[17].x)/4,y:(P[0].y+P[5].y+P[9].y+P[17].y)/4};
+  h.ang=Math.atan2(P[17].y-P[5].y,P[17].x-P[5].x)*180/Math.PI;
+  h.m={x:(P[4].x+P[8].x)/2,y:(P[4].y+P[8].y)/2};
+  act(h,wasGrip,wasPinch);
+ });
+ for(const [k,h] of hands)if(!seen.has(k)&&now-h.seen>350){release(h);hands.delete(k)}
+}
+function act(h,wasGrip,wasPinch){
+ // touch the cube with the index fingertip
+ if(!melted&&!melting&&!h.grip){const c=toScreen(cube),r=Math.max(50,cubePx());if(D(h.P[8],c)<r)melt()}
+ // grab the jug with a fist
+ if(h.grip&&!wasGrip&&!h.mode&&!heldBy){
+  const jc=toScreen(jug,H/2),rad=Math.max(90,jugPx()*0.9);
+  if(D(h.c,jc)<rad){h.mode='jug';heldBy=h;const p=planePoint(h.c.x,h.c.y,JZ);h.off=jug.position.clone().sub(p);h.ang0=h.ang;h.tilt0=tilt;mark('s2a')}
+ }
+ if(h.mode==='jug'){
+  if(!h.grip){release(h)}else{
+   const p=planePoint(h.c.x,h.c.y,JZ).add(h.off);
+   jugT.set(Math.max(-0.62,Math.min(0.62,p.x)),Math.max(0,Math.min(0.55,p.y)),JZ);
+   let da=h.ang-h.ang0;da=((da+540)%360)-180;tilt=Math.max(-130,Math.min(130,h.tilt0+da*1.3));
+  }
+ }
+ // pinch a sticker and pull
+ if(h.pinch&&!wasPinch&&!h.mode){
+  let best=null,bd=Math.max(40,h.palm*0.55);
+  for(const s of holes){if(s.open)continue;const sp=toScreen(s.mesh);const d=D(h.m,sp);if(d<bd){bd=d;best=s}}
+  if(best){h.mode='peel';h.st=best;h.m0={...h.m}}
+ }
+ if(h.mode==='peel'){
+  if(!h.pinch){if(!h.st.open)h.st.peel=0;h.mode=null}
+  else{h.st.peel=Math.min(1,D(h.m,h.m0)/(h.palm*0.9));if(h.st.peel>=1){detach(h.st);h.mode=null}}
+ }
+}
+function release(h){if(h.mode==='jug'&&heldBy===h){heldBy=null;placeJug()}if(h.mode==='peel'&&!h.st.open)h.st.peel=0;h.mode=null}
+function jugPx(){const a=toScreen(jug,0),b=toScreen(jug,H);return Math.abs(a.y-b.y)}
+function cubePx(){const a=toScreen(cube,-0.05),b=toScreen(cube,0.05);return Math.abs(a.y-b.y)*0.75}
+
+/* ---------- hand rendering: real-hand cutout on top of the scene, plus markers ---------- */
+const mask=document.createElement('canvas'),mctx=mask.getContext('2d');
+let handFront=true;
+const BONES=[[0,1,2,3,4],[0,5,6,7,8],[9,10,11,12],[13,14,15,16],[0,17,18,19,20],[5,9,13,17]];
+function drawHands(){
+ fctx.clearRect(0,0,W,Hh);
+ if(!hands.size)return;
+ if(handFront&&video.readyState>=2){
+  mctx.globalCompositeOperation='source-over';mctx.clearRect(0,0,W,Hh);mctx.filter='blur(3px)';
+  mctx.fillStyle=mctx.strokeStyle='#fff';mctx.lineCap=mctx.lineJoin='round';
+  for(const h of hands.values()){const P=h.P;
+   mctx.beginPath();for(const j of[0,1,5,9,13,17])mctx.lineTo(P[j].x,P[j].y);mctx.closePath();mctx.fill();
+   mctx.lineWidth=h.palm*0.42;for(const b of BONES){mctx.beginPath();b.forEach((j,k)=>k?mctx.lineTo(P[j].x,P[j].y):mctx.moveTo(P[j].x,P[j].y));mctx.stroke()}
+   mctx.lineWidth=h.palm*0.7;mctx.beginPath();mctx.moveTo(P[0].x,P[0].y);const fx0=P[0].x-(P[9].x-P[0].x)*0.6,fy0=P[0].y-(P[9].y-P[0].y)*0.6;mctx.lineTo(fx0,fy0);mctx.stroke();
+  }
+  mctx.filter='none';mctx.globalCompositeOperation='source-in';
+  const vw=video.videoWidth,vh=video.videoHeight,s=Math.max(W/vw,Hh/vh);
+  mctx.save();if(mirror){mctx.translate(W,0);mctx.scale(-1,1)}mctx.drawImage(video,(W-vw*s)/2,(Hh-vh*s)/2,vw*s,vh*s);mctx.restore();
+  fctx.drawImage(mask,0,0);
+ }
+ for(const h of hands.values()){const P=h.P,col=h.mode==='jug'||h.grip?'#1688c9':h.pinch?'#e4002b':'#ffffff';
+  fctx.fillStyle=col;for(const j of[4,8,12,16,20]){fctx.beginPath();fctx.arc(P[j].x,P[j].y,5,0,7);fctx.fill()}
+  fctx.lineWidth=4;fctx.strokeStyle=col;fctx.beginPath();fctx.arc(h.c.x,h.c.y,h.palm*0.5,0,7);fctx.stroke();
+  const t=h.mode==='jug'?'holding jug':h.mode==='peel'?'peeling':h.grip?'fist':h.pinch?'pinch':'';
+  if(t){fctx.font='700 15px Nunito,sans-serif';const w=fctx.measureText(t).width+16;fctx.fillStyle='rgba(29,42,51,.85)';fctx.beginPath();fctx.roundRect?fctx.roundRect(h.c.x-w/2,h.c.y+h.palm*0.6,w,24,8):fctx.rect(h.c.x-w/2,h.c.y+h.palm*0.6,w,24);fctx.fill();fctx.fillStyle='#fff';fctx.fillText(t,h.c.x-w/2+8,h.c.y+h.palm*0.6+17)}
+ }
+}
+
+/* ---------- buttons ---------- */
+$('front').onclick=e=>{handFront=!handFront;e.target.setAttribute('aria-pressed',handFront)};
+$('restick').onclick=restick;
+$('slow').onclick=e=>{TS=TS===1?0.25:1;e.target.setAttribute('aria-pressed',TS!==1)};
+$('reset').onclick=reset;
+function melt(){if(melted||melting)return;melting={t:0,from:cube.position.clone()};mark('s1')}
+function reset(){V=0;for(const v of vessels)v.vol=0;spill.vol=0;restick();heldBy=null;for(const h of hands.values())h.mode=null;jugT.set(basin.x,0.12,JZ);jug.position.copy(jugT);jug.rotation.set(0,0,0);tilt=0;melted=false;melting=null;cube.visible=true;cube.scale.setScalar(1);cube.position.copy(CUBE0);for(const s of['s1','s2','s3'])$(s).classList.remove('done')}
+function mark(id){if(id==='s2a')return;$(id).classList.add('done')}
+let tt;function toast(m){const t=$('toast');t.textContent=m;t.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('on'),3500)}
+
+/* ---------- readout ---------- */
+const rows=[['Jug','#2aa2d6',()=>V],...vessels.slice(1).map(v=>[v.name,v.colour,()=>v.vol]),['Red basin','#e8264a',()=>basin.vol],['Spilled','#9fb3bf',()=>spill.vol]];
+function readout(){
+ const tot=V+vessels.reduce((a,v)=>a+v.vol,0)+spill.vol;
+ $('rt').innerHTML=rows.map(r=>`<tr><td><span class="dot" style="background:${r[1]}"></span>${r[0]}</td><td>${Math.round(r[2]())} ml</td></tr>`).join('')+`<tr class="tot"><td>Total water</td><td>${Math.round(tot)} ml</td></tr>`;
+ if(jar.vol+bowl.vol+flask.vol>40)$('s2').classList.add('done');
+ $('status').textContent=landmarker?`Tracking ${hands.size} hand${hands.size===1?'':'s'} · ${fps} fps`:'Camera off';
+}
+
+/* ---------- frame loop ---------- */
+const U=new T.Vector3(),B=new T.Vector3(),q=new T.Quaternion(),tmp=new T.Vector3(),Y=new T.Vector3(0,1,0);
+let last=performance.now(),rt=0;
+function tick(now){
+ const raw=Math.min((now-last)/1000,0.05),dt=raw*TS;last=now;
+ if(landmarker&&video.readyState>=2&&video.currentTime!==lastVT){
+  lastVT=video.currentTime;
+  try{processHands(landmarker.detectForVideo(video,now),now)}catch(e){}
+  fpsN++;if(now-fpsT>1000){fps=fpsN;fpsN=0;fpsT=now}
+ }
+ jug.position.lerp(jugT,Math.min(1,raw*(heldBy?18:9)));
+ jug.rotation.z+=(-tilt*Math.PI/180-jug.rotation.z)*Math.min(1,raw*(heldBy?16:8));
+ if(melting){
+  melting.t=Math.min(1,melting.t+raw/1.6);const k=melting.t;
+  tmp.copy(jug.position);tmp.y+=H+0.08;cube.position.lerpVectors(melting.from,tmp,Math.min(1,k*1.6));cube.scale.setScalar(Math.max(0.02,1-k));
+  const target=1000*k;V+=target-(melting.done||0);melting.done=target;if(k>=1){melting=null;melted=true;cube.visible=false}
+ }
+ for(const h of holes)if(!h.open)h.pivot.rotation.x+=(-h.peel*1.9-h.pivot.rotation.x)*Math.min(1,raw*14);
+ for(const f of falling){if(f.v.lengthSq()===0)continue;f.v.y-=9.81*raw;f.m.position.addScaledVector(f.v,raw);f.m.rotation.x+=f.spin*raw;if(f.m.position.y<0.003){f.m.position.y=0.003;f.m.rotation.set(-Math.PI/2,0,0);f.v.set(0,0,0)}}
+
+ scene.updateMatrixWorld();
+ jug.getWorldPosition(B);jug.getWorldQuaternion(q);U.copy(Y).applyQuaternion(q);
+ const cosT=U.y,sinT=Math.sqrt(Math.max(0,1-cosT*cosT));
+ let vmax=0;if(cosT>0.02){const tn=sinT/cosT;vmax=(2*R*tn<=H?AJ*(H-R*tn):AJ*H*H/(4*R*tn))*1e6}
+ const lipY=B.y+H*cosT-R*sinT,yL=Math.min(B.y+(V*1e-6/AJ)*cosT,lipY);
+ let poured=false;
+ if(V>vmax+0.01&&dt>0){
+  const out=Math.min(V-vmax,Math.min(420,60+3*(V-vmax))*dt);
+  const d=new T.Vector3(0,-1,0).addScaledVector(U,cosT);if(d.length()<0.05)d.set(1,0,0).applyQuaternion(q);d.normalize();
+  const sp=B.clone().addScaledVector(U,H).addScaledVector(d,R+0.004);
+  const hz=new T.Vector3(d.x,0,d.z);if(hz.lengthSq()<1e-6)hz.set(1,0,0);hz.normalize();
+  const L=land(sp,hz.multiplyScalar(0.35));addTo(L.t,out,L.at);V-=out;poured=true;
+  drawStream(0,L.pts,0.0022+0.006*Math.min(1,Math.sqrt(out/dt/220)));
+ }
+ if(!poured)drawStream(0,null);
+ for(const h of holes){
+  let shown=false;
+  if(h.open&&V>0.5&&dt>0){
+   const hp=jug.localToWorld(h.pos.clone()),dep=yL-hp.y;
+   if(dep>0.0005){
+    const vel=Math.sqrt(2*G*dep),out=Math.min(V,CD*HOLE_A*vel*1e6*dt),n=new T.Vector3(0,0,1).applyQuaternion(q).multiplyScalar(vel);
+    const L=land(hp,n);addTo(L.t,out,L.at);V-=out;drawStream(h.i+1,L.pts,0.0019);shown=true;
+    const s=hp.clone().project(camera);h.lbl.style.left=((s.x+1)/2*W)+'px';h.lbl.style.top=((1-s.y)/2*Hh)+'px';h.lbl.textContent=`${(dep*100).toFixed(1)} cm deep · ${vel.toFixed(2)} m/s`;
+   }
+  }
+  if(!shown)drawStream(h.i+1,null);h.lbl.hidden=!shown;
+ }
+ V=Math.max(0,V);
+ body.visible=V>0.5;levelPlane.constant=yL;bottomPlane.setFromNormalAndCoplanarPoint(U,B);
+ cap.visible=V>0.5&&cosT>0.1;
+ if(cap.visible){const s=(yL-B.y)/cosT;capG.position.copy(B).addScaledVector(U,s);const hl=Math.hypot(U.x,U.z);capG.rotation.set(0,hl>1e-4?Math.atan2(-U.z/hl,U.x/hl):0,0);cap.scale.set(1/Math.max(cosT,0.15),1,1)}
+ for(const v of vessels)updateLiquid(v);
+ puddle.visible=spill.vol>0.5;if(puddle.visible){const r=Math.min(0.2,0.0055*Math.sqrt(spill.vol));puddle.scale.set(r,1,r);puddle.position.x=spill.x;puddle.position.z=spill.z}
+ renderer.render(scene,camera);
+ drawHands();
+ if((rt+=raw)>0.15){rt=0;readout()}
+}
+
+/* ---------- sizing ---------- */
+function size(){
+ W=innerWidth;Hh=innerHeight;renderer.setSize(W,Hh,false);fx.width=mask.width=W;fx.height=mask.height=Hh;
+ const a=W/Hh;camera.aspect=a;camera.updateProjectionMatrix();
+ const d=Math.max(1.0,0.7/(Math.tan(20*Math.PI/180)*a)),dir=new T.Vector3(0,0.38,1).normalize(),tg=new T.Vector3(0.02,a<1?0.0:0.06,0);
+ camera.position.copy(tg).addScaledVector(dir,d);camera.lookAt(tg);
+}
+addEventListener('resize',size);size();
+if(innerWidth<700)$('help').open=false;
+reset();readout();
+renderer.setAnimationLoop(tick);
+// test hook: open with ?debug to expose internals to tests/gesture_sim.py
+if(new URLSearchParams(location.search).has('debug'))window.__vl={processHands,toScreen,jug,cube,holes,H,vessels,getV:()=>V};
+</script>
+</body>
+</html>
