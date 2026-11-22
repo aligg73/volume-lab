@@ -24,7 +24,7 @@ Goal: children do this with their own hands. There's no controller: a tablet cam
 
 ## Architecture (index.html)
 
-Layers, bottom to top: `<video>` camera feed (object-fit: cover, mirrored for the front camera; **invisible by default**, "Show camera" button reveals it for the teacher) → three.js canvas (transparent, over a CSS wall gradient) → `#fx` 2D canvas (digital hands) → UI cards.
+Layers, bottom to top: `<video>` camera feed (object-fit: cover, mirrored for the front camera) → `#wall` (covers the camera image by default; "Show camera" hides it. Do NOT hide the video itself with opacity/visibility: Chrome on Android may stop delivering frames) → three.js canvas (transparent, over a CSS wall gradient) → `#fx` 2D canvas (digital hands) → UI cards.
 
 **Units:** metres, millilitres, seconds; y is up. The shelf top is y = 0. The jug group's origin is the centre of its base.
 

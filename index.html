@@ -17,8 +17,10 @@ html,body{height:100%;margin:0;overflow:hidden}
 body{background:linear-gradient(180deg,#eef3f6 0%,#dfe7ec 60%,#c9d5dc 100%)}
 body{color:var(--ink);font:16px/1.5 Nunito,system-ui,sans-serif;-webkit-user-select:none;user-select:none;touch-action:none}
 #cam,#stage,#fx{position:fixed;inset:0;width:100%;height:100%}
-#cam{object-fit:cover;z-index:0;opacity:0;transition:opacity .3s}
-body.camview #cam{opacity:1}
+#cam{object-fit:cover;z-index:0}
+/* the wall covers the camera image; the video itself stays visible so the browser keeps delivering frames */
+#wall{position:fixed;inset:0;z-index:0;background:linear-gradient(180deg,#eef3f6 0%,#dfe7ec 60%,#c9d5dc 100%)}
+body.camview #wall{display:none}
 #stage{z-index:1}#stage canvas{display:block;width:100%;height:100%}
 #fx{z-index:2;pointer-events:none}
 .card{position:fixed;z-index:3;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 8px 28px rgba(0,0,0,.18)}
@@ -56,7 +58,8 @@ button:focus-visible,summary:focus-visible{outline:3px solid var(--blue);outline
 </style>
 </head>
 <body>
-<video id="cam" playsinline muted autoplay></video>
+<video id="cam" playsinline muted></video>
+<div id="wall"></div>
 <div id="stage"></div>
 <canvas id="fx"></canvas>
 
@@ -225,7 +228,7 @@ function planePoint(px,py,z){const n=new T.Vector2(px/W*2-1,-(py/Hh)*2+1),rc=new
 function lmToScreen(l){const vw=video.videoWidth||1280,vh=video.videoHeight||720,s=Math.max(W/vw,Hh/vh),ox=(W-vw*s)/2,oy=(Hh-vh*s)/2;return{x:ox+(mirror?1-l.x:l.x)*vw*s,y:oy+l.y*vh*s}}
 
 /* ---------- hand tracking ---------- */
-let landmarker=null,stream=null,facing='user',lastVT=-1,fps=0,fpsN=0,fpsT=performance.now();
+let landmarker=null,stream=null,facing='user',lastVT=-1,lastFrame=0,playTry=0,trackErr='',fps=0,fpsN=0,fpsT=performance.now();
 const hands=new Map();
 const D=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
 // apparent hand size; knuckle width (index→pinky MCP, ≈0.75 palm) keeps it stable when the palm tips forward
@@ -368,7 +371,12 @@ function readout(){
  const tot=V+vessels.reduce((a,v)=>a+v.vol,0)+spill.vol;
  $('rt').innerHTML=rows.map(r=>`<tr><td><span class="dot" style="background:${r[1]}"></span>${r[0]}</td><td>${Math.round(r[2]())} ml</td></tr>`).join('')+`<tr class="tot"><td>Total water</td><td>${Math.round(tot)} ml</td></tr>`;
  if(jar.vol+bowl.vol+flask.vol>40)$('s2').classList.add('done');
- $('status').textContent=landmarker?`Tracking ${hands.size} hand${hands.size===1?'':'s'} · ${fps} fps`:'Camera off';
+ const now=performance.now();
+ $('status').textContent=!landmarker?'Camera off'
+  :trackErr?'Tracking error: '+trackErr
+  :video.paused?'Camera video paused'
+  :now-lastFrame>1500?`No camera frames (video ${video.videoWidth}×${video.videoHeight}, state ${video.readyState})`
+  :`Tracking ${hands.size} hand${hands.size===1?'':'s'} · ${fps} fps`;
 }
 
 /* ---------- frame loop ---------- */
@@ -377,10 +385,12 @@ let last=performance.now(),rt=0;
 function tick(now){
  const raw=Math.min((now-last)/1000,0.05),dt=raw*TS;last=now;
  if(landmarker&&video.readyState>=2&&video.currentTime!==lastVT){
-  lastVT=video.currentTime;
-  try{processHands(landmarker.detectForVideo(video,now),now)}catch(e){}
+  lastVT=video.currentTime;lastFrame=now;
+  try{processHands(landmarker.detectForVideo(video,now),now);trackErr=''}catch(e){trackErr=e.message||String(e)}
   fpsN++;if(now-fpsT>1000){fps=fpsN;fpsN=0;fpsT=now}
  }
+ // if the browser paused the camera video, restart it (at most once a second)
+ if(stream&&video.paused&&now-playTry>1000){playTry=now;video.play().catch(()=>{})}
  jug.position.lerp(jugT,Math.min(1,raw*(heldBy?18:9)));
  jug.rotation.z+=(-tilt*Math.PI/180-jug.rotation.z)*Math.min(1,raw*(heldBy?16:8));
  if(melting){
