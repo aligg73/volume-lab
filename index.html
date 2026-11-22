@@ -9,14 +9,16 @@
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;700;800&display=swap" rel="stylesheet">
 <style>
 /* Volume Lab, mixed reality with hand tracking.
-   Layers: camera video < 3D scene < real-hand cutout + hand markers < UI */
+   Layers: camera video (hidden unless "Show camera") < 3D scene < digital hands < UI */
 :root{--card:rgba(255,255,255,.92);--ink:#1d2a33;--mut:#566874;--line:#dde4e8;--blue:#1688c9;--red:#e4002b;--gold:#c9962b}
 *{box-sizing:border-box;min-width:0}
 [hidden]{display:none!important}
-html,body{height:100%;margin:0;background:#111;overflow:hidden}
+html,body{height:100%;margin:0;overflow:hidden}
+body{background:linear-gradient(180deg,#eef3f6 0%,#dfe7ec 60%,#c9d5dc 100%)}
 body{color:var(--ink);font:16px/1.5 Nunito,system-ui,sans-serif;-webkit-user-select:none;user-select:none;touch-action:none}
 #cam,#stage,#fx{position:fixed;inset:0;width:100%;height:100%}
-#cam{object-fit:cover;z-index:0}
+#cam{object-fit:cover;z-index:0;opacity:0;transition:opacity .3s}
+body.camview #cam{opacity:1}
 #stage{z-index:1}#stage canvas{display:block;width:100%;height:100%}
 #fx{z-index:2;pointer-events:none}
 .card{position:fixed;z-index:3;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 8px 28px rgba(0,0,0,.18)}
@@ -72,7 +74,7 @@ button:focus-visible,summary:focus-visible{outline:3px solid var(--blue);outline
 
 <div class="card bar">
  <button id="flip">Use back camera</button>
- <button id="front" aria-pressed="true">Hand in front</button>
+ <button id="camview" aria-pressed="false">Show camera</button>
  <button id="restick">Re-stick</button>
  <button id="slow" aria-pressed="false">Slow-mo</button>
  <button id="reset">Reset</button>
@@ -98,6 +100,8 @@ button:focus-visible,summary:focus-visible{outline:3px solid var(--blue);outline
 const T=THREE,$=id=>document.getElementById(id),stage=$('stage'),video=$('cam'),fx=$('fx'),fctx=fx.getContext('2d');
 const R=0.055,H=0.17,AJ=Math.PI*R*R,HOLE_A=Math.PI*0.0025**2,CD=0.62,STK=0.018,JZ=0.02;
 const MP='https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+// digital hand size: wrist to middle knuckle in metres, at jug depth (override with ?hand=0.09)
+const HAND=+new URLSearchParams(location.search).get('hand')||0.075;
 const MODEL='https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
 let G=9.81,TS=1;
 
@@ -213,7 +217,7 @@ function drawStream(i,pts,r){const m=streams[i];if(!pts||pts.length<2){if(m.visi
  m.geometry.dispose();m.geometry=new T.TubeGeometry(new T.CatmullRomCurve3(pts),Math.min(48,pts.length*2),r,6,false);m.visible=true}
 
 /* ---------- screen helpers ---------- */
-let W=1,Hh=1,mirror=true;
+let W=1,Hh=1,mirror=true,handPx=60;
 const sv=new T.Vector3();
 function toScreen(obj,dy=0){obj.getWorldPosition(sv);sv.y+=dy;sv.project(camera);return{x:(sv.x+1)/2*W,y:(1-sv.y)/2*Hh}}
 function planePoint(px,py,z){const n=new T.Vector2(px/W*2-1,-(py/Hh)*2+1),rc=new T.Raycaster();rc.setFromCamera(n,camera);const o=rc.ray.origin,d=rc.ray.direction,t=(z-o.z)/d.z;return o.clone().addScaledVector(d,t)}
@@ -224,6 +228,8 @@ function lmToScreen(l){const vw=video.videoWidth||1280,vh=video.videoHeight||720
 let landmarker=null,stream=null,facing='user',lastVT=-1,fps=0,fpsN=0,fpsT=performance.now();
 const hands=new Map();
 const D=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+// apparent hand size; knuckle width (index→pinky MCP, ≈0.75 palm) keeps it stable when the palm tips forward
+const handSize=P=>Math.max(D(P[0],P[9]),D(P[5],P[17])/0.75);
 async function startCamera(){
  if(stream)stream.getTracks().forEach(t=>t.stop());
  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:1280},height:{ideal:720}},audio:false});
@@ -253,9 +259,17 @@ function processHands(res,now){
  (res.landmarks||[]).forEach((lms,i)=>{
   const key=(res.handednesses?.[i]?.[0]?.categoryName)||('h'+i);seen.add(key);
   let h=hands.get(key);
-  const raw=lms.map(lmToScreen);if(!raw.every(p=>isFinite(p.x)&&isFinite(p.y)))return;
-  if(!h||!isFinite(h.P[0].x)){h={P:raw,grip:false,pinch:false,mode:null,seen:now};hands.set(key,h)}
+  const cam=lms.map(lmToScreen);if(!cam.every(p=>isFinite(p.x)&&isFinite(p.y)))return;
+  // Keep the hand where it is on screen, but redraw it at a fixed size (handPx palm), so it does
+  // not grow when the child reaches toward the tablet. The scale is smoothed to avoid pumping.
+  const rc={x:(cam[0].x+cam[5].x+cam[9].x+cam[17].x)/4,y:(cam[0].y+cam[5].y+cam[9].y+cam[17].y)/4};
+  const k0=handPx/Math.max(1,handSize(cam));
+  const fresh=!h||!isFinite(h.P[0].x);
+  const k=fresh?k0:h.k+(k0-h.k)*0.2;
+  const raw=cam.map(p=>({x:rc.x+(p.x-rc.x)*k,y:rc.y+(p.y-rc.y)*k}));
+  if(fresh){h={P:raw,grip:false,pinch:false,mode:null,seen:now};hands.set(key,h)}
   else h.P=h.P.map((p,j)=>({x:p.x+(raw[j].x-p.x)*0.55,y:p.y+(raw[j].y-p.y)*0.55}));
+  h.k=k;
   h.seen=now;
   const P=h.P,palm=Math.max(20,D(P[0],P[9]));
   const curl=(D(P[12],P[0])+D(P[16],P[0])+D(P[20],P[0]))/3/palm,idx=D(P[8],P[0])/palm,pin=D(P[4],P[8])/palm;
@@ -299,36 +313,47 @@ function release(h){if(h.mode==='jug'&&heldBy===h){heldBy=null;placeJug()}if(h.m
 function jugPx(){const a=toScreen(jug,0),b=toScreen(jug,H);return Math.abs(a.y-b.y)}
 function cubePx(){const a=toScreen(cube,-0.05),b=toScreen(cube,0.05);return Math.abs(a.y-b.y)*0.75}
 
-/* ---------- hand rendering: real-hand cutout on top of the scene, plus markers ---------- */
+/* ---------- hand rendering: friendly digital "glove" hands, no camera image ----------
+   Drawn as one silhouette (outline pass, then fill pass) into an offscreen canvas, then
+   composited slightly transparent so the jug and water stay readable behind the hand. */
 const mask=document.createElement('canvas'),mctx=mask.getContext('2d');
-let handFront=true;
-const BONES=[[0,1,2,3,4],[0,5,6,7,8],[9,10,11,12],[13,14,15,16],[0,17,18,19,20],[5,9,13,17]];
+const FINGERS=[[17,18,19,20,0.21],[13,14,15,16,0.24],[9,10,11,12,0.25],[5,6,7,8,0.24],[1,2,3,4,0.28]];
+const PALM=[0,1,5,9,13,17];
+function handShape(c,P,p,grow,dx,dy){
+ c.beginPath();PALM.forEach((j,i)=>i?c.lineTo(P[j].x+dx,P[j].y+dy):c.moveTo(P[j].x+dx,P[j].y+dy));c.closePath();
+ c.lineWidth=p*0.26+grow;c.fill();c.stroke();
+ for(const f of FINGERS){c.lineWidth=p*f[4]+grow;c.beginPath();for(let i=0;i<4;i++)i?c.lineTo(P[f[i]].x+dx,P[f[i]].y+dy):c.moveTo(P[f[i]].x+dx,P[f[i]].y+dy);c.stroke()}
+}
 function drawHands(){
  fctx.clearRect(0,0,W,Hh);
- if(!hands.size)return;
- if(handFront&&video.readyState>=2){
-  mctx.globalCompositeOperation='source-over';mctx.clearRect(0,0,W,Hh);mctx.filter='blur(3px)';
-  mctx.fillStyle=mctx.strokeStyle='#fff';mctx.lineCap=mctx.lineJoin='round';
-  for(const h of hands.values()){const P=h.P;
-   mctx.beginPath();for(const j of[0,1,5,9,13,17])mctx.lineTo(P[j].x,P[j].y);mctx.closePath();mctx.fill();
-   mctx.lineWidth=h.palm*0.42;for(const b of BONES){mctx.beginPath();b.forEach((j,k)=>k?mctx.lineTo(P[j].x,P[j].y):mctx.moveTo(P[j].x,P[j].y));mctx.stroke()}
-   mctx.lineWidth=h.palm*0.7;mctx.beginPath();mctx.moveTo(P[0].x,P[0].y);const fx0=P[0].x-(P[9].x-P[0].x)*0.6,fy0=P[0].y-(P[9].y-P[0].y)*0.6;mctx.lineTo(fx0,fy0);mctx.stroke();
-  }
-  mctx.filter='none';mctx.globalCompositeOperation='source-in';
-  const vw=video.videoWidth,vh=video.videoHeight,s=Math.max(W/vw,Hh/vh);
-  mctx.save();if(mirror){mctx.translate(W,0);mctx.scale(-1,1)}mctx.drawImage(video,(W-vw*s)/2,(Hh-vh*s)/2,vw*s,vh*s);mctx.restore();
-  fctx.drawImage(mask,0,0);
+ if(!hands.size){
+  if(landmarker){fctx.font='800 22px Nunito,sans-serif';fctx.textAlign='center';fctx.fillStyle='rgba(29,42,51,.55)';fctx.fillText('Show your hands to the camera',W/2,Hh*0.2);fctx.textAlign='start'}
+  return;
  }
- for(const h of hands.values()){const P=h.P,col=h.mode==='jug'||h.grip?'#1688c9':h.pinch?'#e4002b':'#ffffff';
-  fctx.fillStyle=col;for(const j of[4,8,12,16,20]){fctx.beginPath();fctx.arc(P[j].x,P[j].y,5,0,7);fctx.fill()}
-  fctx.lineWidth=4;fctx.strokeStyle=col;fctx.beginPath();fctx.arc(h.c.x,h.c.y,h.palm*0.5,0,7);fctx.stroke();
+ mctx.clearRect(0,0,W,Hh);mctx.lineCap=mctx.lineJoin='round';
+ for(const h of hands.values()){const P=h.P,p=h.palm,ow=Math.max(2.5,p*0.07);
+  const held=h.mode==='jug'||h.grip,pin=h.mode==='peel'||h.pinch;
+  const line=held?'#1688c9':pin?'#e4002b':'#33444f',fill=held?'#dff0fb':pin?'#fff1f3':'#ffffff';
+  // soft shadow
+  mctx.fillStyle=mctx.strokeStyle='rgba(20,40,55,.16)';handShape(mctx,P,p,0,p*0.07,p*0.11);
+  // cuff (a sleeve, so the hand doesn't end abruptly); its colour shows the hand's state
+  const ux=(P[0].x-P[9].x)/p,uy=(P[0].y-P[9].y)/p;
+  mctx.strokeStyle=line;mctx.lineWidth=p*0.78;mctx.beginPath();mctx.moveTo(P[0].x+ux*p*0.12,P[0].y+uy*p*0.12);mctx.lineTo(P[0].x+ux*p*0.5,P[0].y+uy*p*0.5);mctx.stroke();
+  // outline pass, then fill pass: one clean silhouette
+  mctx.fillStyle=mctx.strokeStyle=line;handShape(mctx,P,p,ow*2,0,0);
+  mctx.fillStyle=mctx.strokeStyle=fill;handShape(mctx,P,p,0,0,0);
+  // fingernail dots on the thumb and index tip (the pinch points)
+  mctx.fillStyle=pin?'#e4002b':'rgba(51,68,79,.35)';for(const j of[4,8]){mctx.beginPath();mctx.arc(P[j].x,P[j].y,Math.max(3,p*0.06),0,7);mctx.fill()}
+ }
+ fctx.globalAlpha=0.9;fctx.drawImage(mask,0,0);fctx.globalAlpha=1;
+ for(const h of hands.values()){
   const t=h.mode==='jug'?'holding jug':h.mode==='peel'?'peeling':h.grip?'fist':h.pinch?'pinch':'';
-  if(t){fctx.font='700 15px Nunito,sans-serif';const w=fctx.measureText(t).width+16;fctx.fillStyle='rgba(29,42,51,.85)';fctx.beginPath();fctx.roundRect?fctx.roundRect(h.c.x-w/2,h.c.y+h.palm*0.6,w,24,8):fctx.rect(h.c.x-w/2,h.c.y+h.palm*0.6,w,24);fctx.fill();fctx.fillStyle='#fff';fctx.fillText(t,h.c.x-w/2+8,h.c.y+h.palm*0.6+17)}
+  if(t){const y=h.c.y+h.palm*1.15;fctx.font='700 15px Nunito,sans-serif';const w=fctx.measureText(t).width+16;fctx.fillStyle='rgba(29,42,51,.85)';fctx.beginPath();fctx.roundRect?fctx.roundRect(h.c.x-w/2,y,w,24,8):fctx.rect(h.c.x-w/2,y,w,24);fctx.fill();fctx.fillStyle='#fff';fctx.fillText(t,h.c.x-w/2+8,y+17)}
  }
 }
 
 /* ---------- buttons ---------- */
-$('front').onclick=e=>{handFront=!handFront;e.target.setAttribute('aria-pressed',handFront)};
+$('camview').onclick=e=>{const on=document.body.classList.toggle('camview');e.target.setAttribute('aria-pressed',on)};
 $('restick').onclick=restick;
 $('slow').onclick=e=>{TS=TS===1?0.25:1;e.target.setAttribute('aria-pressed',TS!==1)};
 $('reset').onclick=reset;
@@ -409,14 +434,15 @@ function size(){
  W=innerWidth;Hh=innerHeight;renderer.setSize(W,Hh,false);fx.width=mask.width=W;fx.height=mask.height=Hh;
  const a=W/Hh;camera.aspect=a;camera.updateProjectionMatrix();
  const d=Math.max(1.0,0.7/(Math.tan(20*Math.PI/180)*a)),dir=new T.Vector3(0,0.38,1).normalize(),tg=new T.Vector3(0.02,a<1?0.0:0.06,0);
- camera.position.copy(tg).addScaledVector(dir,d);camera.lookAt(tg);
+ camera.position.copy(tg).addScaledVector(dir,d);camera.lookAt(tg);camera.updateMatrixWorld();
+ const h0=new T.Vector3(0,0.1,JZ).project(camera),h1=new T.Vector3(0,0.1+HAND,JZ).project(camera);handPx=Math.max(24,Math.abs(h1.y-h0.y)/2*Hh);
 }
 addEventListener('resize',size);size();
 if(innerWidth<700)$('help').open=false;
 reset();readout();
 renderer.setAnimationLoop(tick);
 // test hook: open with ?debug to expose internals to tests/gesture_sim.py
-if(new URLSearchParams(location.search).has('debug'))window.__vl={processHands,toScreen,jug,cube,holes,H,vessels,getV:()=>V};
+if(new URLSearchParams(location.search).has('debug'))window.__vl={processHands,toScreen,hands,handPx:()=>handPx,jug,cube,holes,H,vessels,getV:()=>V};
 </script>
 </body>
 </html>

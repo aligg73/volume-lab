@@ -5,7 +5,7 @@ A mixed-reality version of a Montessori volume lesson for schoolchildren. In the
 2. pours that litre into differently shaped glass vessels (tall jar, wide bowl, round flask), so children see the amount stays the same in every shape,
 3. uses a measuring jug with **red stickers** covering holes at different heights. Standing over a red basin, the teacher peels the stickers off and water jets out, farther from the deeper holes (water pressure increases with depth).
 
-Goal: children do this with their own hands. There's no controller: a tablet camera tracks the hand, the child sees their real hand on screen, and real hand movements grab the jug, pour, and peel stickers.
+Goal: children do this with their own hands. There's no controller: a tablet camera tracks the hand, the child sees a simple digital hand on screen (not the camera image), and real hand movements grab the jug, pour, and peel stickers.
 
 ## Files
 
@@ -20,11 +20,11 @@ Goal: children do this with their own hands. There's no controller: a tablet cam
   - MediaPipe `@mediapipe/tasks-vision` **0.10.14**, `HandLandmarker`, `runningMode: 'VIDEO'`, `numHands: 2`, GPU delegate with CPU fallback. The model `.task` file loads from `storage.googleapis.com`.
 - **The camera needs a secure context**: https://, or `localhost`. A LAN address like `http://192.168.x.x` will NOT get camera access.
 - Claude artifact pages block the camera (sandboxed iframe), so the MR app must be hosted elsewhere (GitHub Pages, Netlify, etc.).
-- Target device: Lenovo IdeaPad Tab (Android, Chrome). Keep the frame cost low: renderer pixel ratio is capped at 1.5, and the hand-cutout canvas runs at CSS pixel size.
+- Target device: Lenovo IdeaPad Tab (Android, Chrome). Keep the frame cost low: renderer pixel ratio is capped at 1.5, and the hand canvas runs at CSS pixel size.
 
 ## Architecture (index.html)
 
-Layers, bottom to top: `<video>` camera feed (object-fit: cover, mirrored for the front camera) → three.js canvas (transparent) → `#fx` 2D canvas (real-hand cutout + hand markers) → UI cards.
+Layers, bottom to top: `<video>` camera feed (object-fit: cover, mirrored for the front camera; **invisible by default**, "Show camera" button reveals it for the teacher) → three.js canvas (transparent, over a CSS wall gradient) → `#fx` 2D canvas (digital hands) → UI cards.
 
 **Units:** metres, millilitres, seconds; y is up. The shelf top is y = 0. The jug group's origin is the centre of its base.
 
@@ -36,6 +36,7 @@ Layers, bottom to top: `<video>` camera feed (object-fit: cover, mirrored for th
 - Vessels are lathe profiles `[[radius, y], …]` with a precomputed volume→height table (`hAt`), so any shape works.
 
 **Hand interaction** (`processHands` → `act`), all in screen pixels, with thresholds scaled by palm length (wrist → middle knuckle):
+- hands are rescaled about their centre to a fixed palm size `handPx` (= `HAND` 0.075 m projected at jug depth; tune with `?hand=0.09`), so a hand near the camera doesn't get huge. Size = max(wrist→middle MCP, index→pinky MCP / 0.75), scale smoothed 0.2/frame. Gestures run on the rescaled hand, so what's drawn is what interacts
 - landmarks are smoothed (factor 0.55 per frame); a hand unseen for 350 ms releases what it holds
 - fist (grip): middle/ring/pinky tips average < 1.25 palm from the wrist AND index tip < 1.45. Releases at > 1.55 (hysteresis)
 - pinch: thumb–index tip distance < 0.30 palm, releases at > 0.50; never at the same time as a grip
@@ -44,11 +45,11 @@ Layers, bottom to top: `<video>` camera feed (object-fit: cover, mirrored for th
 - cube: index fingertip (or a pinch) touches it → melts into 1000 ml
 - releasing the jug puts it on the shelf if there's room, otherwise back on its stand in the basin
 
-**Hand in front:** the hand is drawn as a blurred mask (palm polygon + thick finger strokes), then the camera image is composited `source-in`, so the real hand covers the virtual objects.
+**Digital hands:** a white "glove" silhouette (palm polygon + round finger strokes; outline pass then fill pass into an offscreen canvas, composited at 0.9 alpha) with a cuff and drop shadow. Colour shows state: blue = fist/holding, red = pinch/peeling. With no hands tracked, a "Show your hands to the camera" hint appears. Deliberately not photo-realistic: the camera image (and the child's face) distracted from the task.
 
 ## Testing
 
-- Logic without a camera: `python -m http.server 8000`, then `python tests/gesture_sim.py`. Screenshots go to `tests/out/`. Extend it whenever you change gestures or physics.
+- Logic without a camera: `python -m http.server 8000`, then `python tests/gesture_sim.py` (without a local Playwright: `uv run --with playwright==1.59.0 python tests/gesture_sim.py`, which matches the cached Chromium). Screenshots go to `tests/out/`. Extend it whenever you change gestures or physics.
 - On the tablet with live debugging: enable USB debugging, connect, then
   `adb reverse tcp:8000 tcp:8000` → open `http://localhost:8000/` in Chrome on the tablet. That counts as a secure context, so the camera works. Use `chrome://inspect` on the desktop for console and performance.
 - The help panel shows tracked hands and the tracking fps. Under ~12 fps it feels laggy.
@@ -58,5 +59,5 @@ Layers, bottom to top: `<video>` camera feed (object-fit: cover, mirrored for th
 - No real depth from a single camera: interaction is 2.5D (screen plane).
 - Water passes through walls; no splashing.
 - The surface cap is approximate at steep tilt with little water left.
-- The hand cutout edge is soft and fingers always draw in front of the jug.
+- The digital hand always draws in front of the jug. With "Show camera" on, the real hand and the (smaller) digital hand don't line up; that view is for the teacher/debugging.
 - Gesture thresholds are tuned on synthetic hands only, not yet on real children's hands.

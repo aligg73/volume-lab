@@ -9,7 +9,8 @@ Usage:
   python tests/gesture_sim.py         # writes screenshots to tests/out/
 
 Passes when: the cube melts, water reaches the wide bowl, a sticker comes off,
-and the page throws no errors.
+a hand close to the camera is drawn at the fixed digital size, and the page
+throws no errors.
 """
 import asyncio, os, sys
 from playwright.async_api import async_playwright
@@ -47,12 +48,20 @@ async def main():
         await pg.evaluate("document.getElementById('start').hidden=true")
         await pg.evaluate(GEN)
 
-        async def feed(wx, wy, ang, st, n=1, wait=40, p=90):
+        # Hands are redrawn at a fixed palm size (handPx); generate them at that size so the
+        # fingertip offsets below land where intended.
+        p = await pg.evaluate("__vl.handPx()")
+
+        async def feed(wx, wy, ang, st, n=1, wait=40, size=None):
             for _ in range(n):
-                await pg.evaluate(f"feed({wx},{wy},{p},{ang},'{st}')")
+                await pg.evaluate(f"feed({wx},{wy},{size or p},{ang},'{st}')")
                 await pg.wait_for_timeout(wait)
 
-        p = 90
+        # 0. a hand right in front of the camera (4x bigger) is still drawn at handPx
+        await feed(1000, 600, 0, "open", 25, 20, size=p * 4)
+        await pg.screenshot(path=f"{OUT}/hand_close.png")
+        drawn = await pg.evaluate("[...__vl.hands.values()][0].palm")
+        await pg.wait_for_timeout(500)  # let the hand drop out of tracking
         # 1. touch the cube with the index fingertip (tip sits at -0.35p, -1.9p from the wrist)
         c = await pg.evaluate("__vl.toScreen(__vl.cube)")
         await feed(c["x"] + 0.35 * p, c["y"] + 1.9 * p, 0, "open", 5)
@@ -70,6 +79,7 @@ async def main():
             await feed(tx, ty, 6 * i, "fist", 1, 30)
         await feed(tx, ty, 60, "fist", 30, 50)
         await pg.screenshot(path=f"{OUT}/pour.png")
+        held = await pg.evaluate("[...__vl.hands.values()][0].mode")
         await feed(tx, ty, 60, "open", 4); await pg.wait_for_timeout(1200)
 
         # 3. pinch the lowest sticker (pinch point at -0.75p, -0.81p from the wrist) and pull
@@ -85,8 +95,10 @@ async def main():
           open:__vl.holes.map(h=>h.open),total:__vl.getV()+__vl.vessels.reduce((a,v)=>a+v.vol,0)})""")
         await b.close()
 
-    print(st)
+    print(st, {"handPx": round(p, 1), "drawn_palm": round(drawn, 1)})
     checks = {
+        "close hand drawn at fixed size": abs(drawn - p) < 0.1 * p,
+        "fist grabbed the jug": held == "jug",
         "no page errors": not errs,
         "cube melted": st["total"] > 0,
         "water in bowl": st["vessels"][2] > 50,
